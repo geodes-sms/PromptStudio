@@ -3,7 +3,7 @@ PromptStudio is a tool to assist in engineering prompts for large language model
 It is meant to be used for any application domain and task. However, it does not support conversational prompts. Each prompt sent is assumed to be indepdent of any previous prompt sent.
 
 PromptStudio generalizes Gauransh's [PromptSLR](https://github.com/geodes-sms/PromptSLR).
-A very related tool is [PromptFoo](https://www.promptfoo.dev/). It allows to connect to different LLMs and run prompt templates on many inputs. You can define your own metrics and your own evaluation of the result. Configurations are done using YAML. Prompt templates use [Nunjucks]https://mozilla.github.io/nunjucks/ syntax. It is an [open source project](https://github.com/promptfoo/promptfoo).
+A very related tool is [PromptFoo](https://www.promptfoo.dev/). It allows connecting to different LLMs and run prompt templates on many inputs. You can define your own metrics and your own evaluation of the result. Configurations are done using YAML. Prompt templates use [Nunjucks](https://mozilla.github.io/nunjucks/) syntax. PromptFoo is an [open source project](https://github.com/promptfoo/promptfoo).
 
 PromptStudio comprises 3 modules: designer, configurator, and analyzer.
 
@@ -153,7 +153,7 @@ The output is provided as a string. The entire result is also provided in case m
 ```python
 '''
 Modifies the output received.
-@param 	output	str		The text output by the model.
+@param 	output	str	The text output by the model.
 @param 	result	json	The whole result in JSON format.
 '''
 def postprocess(output, result):
@@ -170,8 +170,8 @@ Both the output and oracle are provided as strings.
 ```python
 '''
 Verifies how similar the output is to the oracle.
-@param 	output	str		The text output by the model.
-@param 	oracle	str		The expected result.
+@param 	output	str	The text output by the model.
+@param 	oracle	str	The expected result.
 '''
 def evaluate(output, oracle):
   return output == oracle
@@ -248,6 +248,8 @@ Self-validation is characterized by:
 - The number of **validation iterations**: for self-consistency and statistical power.
 
 The self-validation results are stored in a separate *Experiment validation* table and can be analyzed like the original results.
+
+[Shankar et al.](https://arxiv.org/abs/2404.12272) suggests an architecture to use the validation as a recommender to improve the prompt.
 
 ## Experiment setup
 An experiment is characterized by:
