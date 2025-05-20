@@ -4,12 +4,15 @@ Here is a dump of my head for the challenges a 3-year project should address. Mo
 
 ## 1. Cost-efficient scalable prompt optimization
 ### 1.1. Advanced prompt templates
+*HQP: Vennila*
 - Markers logic *(see PromptStudio doc)*
 - Integrate into chains
 - Prompt paraphrasing *(Kiruthika)*: parameters, intent
+- Derive prompt variants 
 - *ChainForge configuration mode to customize built-in prompts + LLMs to use for each interaction*
 
 ### 1.2. Headless mode of ChainForge
+*HQP: Samuel, Parsa*
 - Export a chain
 - Setup an experiment
 - Input dataset
@@ -19,6 +22,7 @@ Here is a dump of my head for the challenges a 3-year project should address. Mo
 - Integrate in ChainForge GUI
 
 ### 1.3. Search-space exploration
+*HQP: Cassendre, Parsa*
 - Multi-armed bandit cost-efficient optimization for search-space pruning
 - Thompson sampling
 - LLM-based search
@@ -38,7 +42,8 @@ Here is a dump of my head for the challenges a 3-year project should address. Mo
 ### 2.3. Visualization of qualitative evaluation
 - Trade-offs
 
-### 2.4. Reporting methodology *(Karla)*
+### 2.4. Reporting methodology
+*HQP: Karla*
 - Reporting results
 - Reporting the prompt engineering process
 
