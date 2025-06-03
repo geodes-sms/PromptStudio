@@ -7,7 +7,8 @@ export type Experiment = {
   id: number;
   title: string;
   iterations: number;
-  max_retry: number;
+  max_retry?: number;
+  threads?: number;
 };
 
 export type Promptconfig = {

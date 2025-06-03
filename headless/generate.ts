@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as yaml from "js-yaml";
-import {Evaluator, Experiment, MarkerMap, Llm_params, Promptconfig, Input, Result, Llm} from "../backend/api/types";
+import {Evaluator, Llm_params, Promptconfig, Input, Result} from "../backend/api/types";
 // @ts-ignore
 import ProgressBar from 'progress';
 import {
@@ -36,7 +36,7 @@ import {executejs, queryLLM} from "../backend/backend";
 import {LLMResponse, LLMSpec, PromptVarsDict} from "../backend/typing";
 import {Command} from "commander";
 import {readFile} from "fs/promises";
-import {PromptPermutationGenerator, PromptTemplate} from "../backend/template";
+import {PromptPermutationGenerator} from "../backend/template";
 
 async function save_config(yml_file: string){
   try{
@@ -290,7 +290,6 @@ async function run_experiment(experiment_name: string) {
           for (const response of responses.responses){
             bar.tick();
             progress++;
-            console.log(response);
             for (const llm_response of response.responses){
               await save_response(config.id, llm_response, input_id);
             }

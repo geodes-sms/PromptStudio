@@ -84,8 +84,8 @@ export async function save_template(template: string, name: string): Promise<num
 
 export async function save_experiment(experiment: Experiment): Promise<number> {
   try {
-    const sql = "INSERT INTO Experiment(title, iterations, max_retry) VALUES (?, ?, ?)";
-    const values = [experiment.title, experiment.iterations, experiment.max_retry];
+    const sql = "INSERT INTO Experiment(title, iterations, max_retry, threads) VALUES (?, ?, ?, ?)";
+    const values = [experiment.title, experiment.iterations, experiment.max_retry, experiment.threads];
     const [result] = await pool.execute(sql, values);
     return result.insertId;
   } catch (error) {

@@ -465,6 +465,7 @@ export class PromptPipeline {
       };
     }
 
+
     return {
       prompt,
       chat_history,

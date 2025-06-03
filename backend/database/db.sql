@@ -11,6 +11,7 @@ CREATE TABLE Experiment(
     datetime TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     total_requests INT NOT NULL DEFAULT 0,
     max_retry INT NOT NULL DEFAULT 0,
+    threads INT NOT NULL DEFAULT 1,
     CONSTRAINT PK_Experiment PRIMARY KEY (id),
     CHECK ( iterations > 0 ),
     CHECK ( max_retry >= 0 )
