@@ -1,0 +1,4 @@
+oracle,text,prompt,test
+this is the oracle,this is a {test},this is a prompt, hello
+this is the second oracle,this is another {test},this is another prompt, hello again
+the last oracle,the cat sat on the {test},describe the scene, hello world
