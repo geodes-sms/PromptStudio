@@ -10,6 +10,7 @@
     "@azure/openai": "^1.0.0-beta.2",
     "@codemirror/lang-javascript": "^6.1.5",
     "@codemirror/lang-python": "^6.1.2",
+    "@dqbd/tiktoken": "^1.0.21",
     "@emoji-mart/data": "^1.1.2",
     "@emoji-mart/react": "^1.1.1",
     "@emotion/cache": "^11.14.0",
