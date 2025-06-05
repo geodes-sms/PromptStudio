@@ -227,11 +227,12 @@ export async function get_last_input_id(dataset_id: number): Promise<number>{
     }
 }
 
-export async function save_error(config_id: number, error_message: string, input_id: number): Promise<number>{
+export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number): Promise<number>{
     try{
         const response = await axios.post(`${URL}/error`, {
             config_id,
             error_message,
+            error_status,
             input_id
         });
         return response.data.error_id;

@@ -284,6 +284,7 @@ export async function run_experiment(experiment_name: string) {
           );
 
           for (const response of responses.responses) {
+            // console.log(response.tokens);
             bar.tick();
             for (const llm_response of response.responses) {
               await save_response(config.id, llm_response, input_id);
@@ -294,7 +295,8 @@ export async function run_experiment(experiment_name: string) {
 
           for (const key of Object.keys(responses.errors)) {
             for (const err of responses.errors[key]) {
-              await save_error(config.id, err, input_id);
+              // TODO Change save_error to add status code and message
+              await save_error(config.id, err.message, err.status, input_id);
               tries++;
               if (tries >= experiment.max_retry) {
                 errors++;
