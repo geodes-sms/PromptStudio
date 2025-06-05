@@ -3,9 +3,11 @@ import { LLM } from "./models";
 
 /** Raised when there is an error generating a single response from an LLM */
 export class LLMResponseError extends Error {
-  constructor(message: string) {
+  private status: number;
+  constructor(message: string, status: number) {
     super(message);
     this.name = "LLMResponseError";
+    this.status = status;
   }
 }
 

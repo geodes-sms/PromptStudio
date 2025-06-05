@@ -145,6 +145,7 @@ CREATE TABLE Error(
     config_id INT NOT NULL,
     input_id INT NOT NULL,
     error_message TEXT NOT NULL,
+    error_code INT NOT NULL,
     Datetime TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT PK_Error PRIMARY KEY (id),
     CONSTRAINT FK_config_id_error FOREIGN KEY (config_id) REFERENCES PromptConfig(id),

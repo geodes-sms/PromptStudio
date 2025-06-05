@@ -397,10 +397,10 @@ export async function get_last_input_id(dataset_id: number): Promise<number>{
   }
 }
 
-export async function save_error(config_id: number, error_message: string, input_id: number): Promise<number>{
+export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number): Promise<number>{
   try{
-    const sql = 'INSERT INTO error(config_id, error_message, input_id) VALUES (?, ?, ?)';
-    const values = [config_id, error_message, input_id];
+    const sql = 'INSERT INTO error(config_id, error_message, error_code, input_id) VALUES (?, ?, ?, ?)';
+    const values = [config_id, error_message, error_status, input_id];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
   }

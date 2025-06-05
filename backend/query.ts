@@ -148,6 +148,7 @@ export class PromptPipeline {
       uid: uuid(),
       responses: extracted_resps,
       llm,
+      tokens: response.usage,
       vars: mergeDicts(info, chat_history?.fill_history) ?? {},
       metavars: mergeDicts(metavars, chat_history?.metavars) ?? {},
     };
@@ -455,11 +456,10 @@ export class PromptPipeline {
       if (should_cancel && should_cancel()) throw new UserForcedPrematureExit();
     } catch (err) {
       if (err instanceof UserForcedPrematureExit) throw err; // bubble cancels up
-
       return {
         prompt,
         query: undefined,
-        response: new LLMResponseError((err as Error).message),
+        response: new LLMResponseError((err as Error).message, err.status),
         past_resp_obj: undefined,
         past_resp_obj_cache_idx: -1,
       };

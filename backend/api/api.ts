@@ -311,8 +311,8 @@ app.get('/last_input/:dataset_id', async (req, res) => {
 // Save an error
 app.post('/error', async (req, res) => {
     try{
-        const { config_id, error_message, input_id } = req.body;
-        const error_id = await save_error(config_id, error_message, input_id);
+        const { config_id, error_message, error_status, input_id } = req.body;
+        const error_id = await save_error(config_id, error_message, error_status, input_id);
         res.status(201).json({ error_id });
     }
     catch (error) {

@@ -169,6 +169,7 @@ function to_standard_format(r: RawLLMResponseObject | Dict): LLMResponse {
     llm: r.llm,
     prompt: r.prompt,
     responses: r.responses,
+    tokens: r.tokens ?? {},
     uid: r.uid ?? uuid(),
   };
   if ("eval_res" in r) resp_obj.eval_res = r.eval_res;
@@ -436,7 +437,7 @@ export async function generatePrompts(
 interface LLMPrompterResults {
   llm_key: string;
   responses: Array<RawLLMResponseObject>;
-  errors: Array<string>;
+  errors: Array<LLMResponseError>;
 }
 
 function extract_llm_provider(llm_spec: LLMSpec): LLMProvider {
@@ -473,7 +474,7 @@ export async function queryLLM(
   progress_listener?: (progress: { [key: symbol]: any }) => void,
   cont_only_w_prior_llms?: boolean,
   cancel_id?: string | number,
-): Promise<{ responses: LLMResponse[]; errors: Dict<string[]> }> {
+): Promise<{ responses: LLMResponse[]; errors: Dict<LLMResponseError[]> }> {
   // Verify the integrity of the params
   if (typeof id !== "string" || id.trim().length === 0)
     throw new Error("id is improper format (length 0 or not a string)");
@@ -515,7 +516,7 @@ export async function queryLLM(
 
   // For each LLM, generate and cache responses:
   const responses: { [key: string]: Array<RawLLMResponseObject> } = {};
-  const all_errors: Dict<string[]> = {};
+  const all_errors: Dict<LLMResponseError[]> = {};
   const num_generations = n ?? 1;
   async function query(
     llm_spec: LLMSpec,
@@ -533,7 +534,7 @@ export async function queryLLM(
     // Prompt the LLM with all permutations of the input prompt template:
     // NOTE: If the responses are already cache'd, this just loads them (no LLM is queried, saving $$$)
     const resps: Array<RawLLMResponseObject> = [];
-    const errors: Array<string> = [];
+    const errors: Array<LLMResponseError> = [];
     let num_resps = 0;
     let num_errors = 0;
 
@@ -558,7 +559,7 @@ export async function queryLLM(
             `error when fetching response from ${llm_spec.base_model}: ${response.message}`,
           );*/
           num_errors += 1;
-          errors.push(response.message);
+          errors.push(response);
         } else {
           // The request succeeded
           response.llm = llm_spec;
