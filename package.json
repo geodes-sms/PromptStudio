@@ -110,11 +110,13 @@
     "stream-http": "^3.2.0",
     "styled-components": "^5.3.10",
     "tls": "^0.0.1",
+    "tsx": "^4.19.4",
     "typescript": "^5.1.3",
     "url": "^0.11.1",
     "util": "^0.12.5",
     "uuidv4": "^6.2.13",
     "web-vitals": "^2.1.4",
+    "workerpool": "^9.3.2",
     "xlsx": "^0.18.5",
     "zustand": "^4.3.7"
   },

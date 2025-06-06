@@ -9,6 +9,9 @@ export class LLMResponseError extends Error {
     this.name = "LLMResponseError";
     this.status = status;
   }
+  getStatus(): number {
+    return this.status;
+  }
 }
 
 // Dictionary types

@@ -15,7 +15,7 @@ const execPy = (() => {
     // Initalize the worker only when first called, to save on load times
     if (!pyodideWorker) {
       pyodideWorker = new Worker(
-        new URL("./exec-py.worker.js", import.meta.url),
+        new URL("./exec-py.worker.ts", import.meta.url),
       );
       pyodideWorker.onmessage = (event) => {
         const { id, ...data } = event.data;

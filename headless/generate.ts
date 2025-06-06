@@ -52,6 +52,8 @@ import {
 } from "./apiCall";
 import { PromptPermutationGenerator } from "../backend/template";
 import {getTokenCount} from "./token";
+import * as path from "node:path";
+import workerpool from "workerpool";
 
 export async function save_config(yml_file: string) {
   try {
@@ -244,6 +246,16 @@ export async function run_experiment(experiment_name: string) {
 
     const bar = new ProgressBar("Processing LLM calls: [:bar] :percent :etas", { total });
     let errors = 0;
+    const num_workers = experiment.threads || 1;
+    const pool = workerpool.pool(path.resolve(__dirname, 'worker.ts'), {
+      minWorkers: num_workers,
+      maxWorkers: num_workers,
+      workerType: "thread",
+      workerThreadOpts: {
+        execArgv: ['--require', 'tsx']
+      },
+    });
+    const allTaskPromises: Promise<void>[] = [];
 
     for (const config of prompt_configs) {
       const llm = await get_llm_by_id(config.LLM_id);
@@ -267,46 +279,18 @@ export async function run_experiment(experiment_name: string) {
         if (existing?.length) iterations -= existing.length;
         if (iterations <= 0) continue;
 
-        let tries = 0;
-
-        while (tries <= experiment.max_retry) {
-          const responses = await queryLLM(
-              config.id.toString(),
-              [llm_spec],
-              iterations,
-              template.value,
-              markersDict,
-              [undefined],
-              {
-                OpenAI: "sk-bmbbiv6x1vjlub79148bha2hnz2m2of",
-                Google: "AIzaSyCUCsxmHNL8GlBzeDhERyUgMXzYzwgxHJk",
-              }
-          );
-
-          for (const response of responses.responses) {
-            // console.log(response.tokens);
-            bar.tick();
-            for (const llm_response of response.responses) {
-              await save_response(config.id, llm_response, input_id);
-            }
-          }
-
-          if (!responses.errors || Object.keys(responses.errors).length === 0) break;
-
-          for (const key of Object.keys(responses.errors)) {
-            for (const err of responses.errors[key]) {
-              // TODO Change save_error to add status code and message
-              await save_error(config.id, err.message, err.status, input_id);
-              tries++;
-              if (tries >= experiment.max_retry) {
+        const promise = pool.exec('processExperiment', [config.id, llm_spec, iterations, template.value, markersDict, experiment.max_retry, input_id])
+            .then((result: boolean) => {
+              if(!result){
                 errors++;
-                bar.tick();
               }
-            }
-          }
-        }
+              bar.tick();
+            });
+        allTaskPromises.push(promise);
       }
     }
+    await Promise.all(allTaskPromises);
+    await pool.terminate();
     if (errors > 0) {
       console.error(`Experiment "${experiment_name}" completed with ${errors} errors.`);
     }
