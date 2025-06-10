@@ -54,6 +54,8 @@ import { PromptPermutationGenerator } from "../backend/template";
 import {getTokenCount} from "./token";
 import * as path from "node:path";
 import workerpool from "workerpool";
+import {ExperimentRunner} from "./ExperimentRunner";
+import {create_llm_spec, get_marker_map} from "./utils";
 
 export async function save_config(yml_file: string) {
   try {
@@ -200,7 +202,7 @@ export async function evaluate_experiment(experiment_name: string) {
           };
 
           const eval_result = await executejs("0", evaluator.code, [response], "response", "evaluator");
-          console.log(eval_result);
+          // console.log(eval_result);
         }
       }
     }
@@ -209,43 +211,18 @@ export async function evaluate_experiment(experiment_name: string) {
   }
 }
 
-async function get_marker_map(input: Input) {
-  const markersDict: PromptVarsDict = {};
-  for (const marker of input.markers) {
-    const name = await get_marker_by_id(marker.marker_id);
-    markersDict[name] = marker.value;
-  }
-  return markersDict;
-}
 
-function create_llm_spec(llm: LLMSpec, llm_param: Llm_params): LLMSpec {
-  const settings: any = {
-    ...(llm_param.max_tokens !== undefined && { max_tokens: llm_param.max_tokens }),
-    ...(llm_param.top_p !== undefined && { top_p: llm_param.top_p }),
-    ...(llm_param.top_k !== undefined && { top_k: llm_param.top_k }),
-    ...(llm_param.stop_sequence !== undefined && { stop_sequence: llm_param.stop_sequence }),
-    ...(llm_param.frequency_penalty !== undefined && { frequency_penalty: llm_param.frequency_penalty }),
-    ...(llm_param.presence_penalty !== undefined && { presence_penalty: llm_param.presence_penalty }),
-    ...llm_param.custom_params,
-  };
 
-  return {
-    name: llm.name,
-    model: llm.model,
-    temp: llm_param.temperature,
-    base_model: llm.base_model,
-    settings,
-  };
-}
+
+
 
 export async function run_experiment(experiment_name: string) {
-  try {
+  try{
     const experiment = await get_experiment_by_name(experiment_name);
     const prompt_configs = await get_prompt_config_by_experiment(experiment.id);
     const total = await get_number_of_total_inputs(prompt_configs);
-
     const bar = new ProgressBar("Processing LLM calls: [:bar] :percent :etas", { total });
-    let errors = 0;
+
     const num_workers = experiment.threads || 1;
     const pool = workerpool.pool(path.resolve(__dirname, 'worker.ts'), {
       minWorkers: num_workers,
@@ -255,49 +232,11 @@ export async function run_experiment(experiment_name: string) {
         execArgv: ['--require', 'tsx']
       },
     });
-    const allTaskPromises: Promise<void>[] = [];
 
-    for (const config of prompt_configs) {
-      const llm = await get_llm_by_id(config.LLM_id);
-      const llm_param = await get_llm_param_by_id(config.LLM_param_id);
-      const template = await get_template_by_id(config.prompt_template_id);
-      const dataset = await get_dataset_by_id(config.dataset_id);
-      const llm_spec = create_llm_spec(llm, llm_param);
-
-      let input_id = 0;
-      const last_id = await get_last_input_id(dataset.id);
-
-      while (input_id !== last_id) {
-        const input = await get_next_input(dataset.id, input_id);
-        if (!input) break;
-
-        input_id = input.id;
-        const markersDict = await get_marker_map(input);
-
-        let iterations = experiment.iterations;
-        const existing = await get_results(config.id, input_id);
-        if (existing?.length) iterations -= existing.length;
-        if (iterations <= 0) continue;
-
-        const promise = pool.exec('processExperiment', [config.id, llm_spec, iterations, template.value, markersDict, experiment.max_retry, input_id])
-            .then((result: boolean) => {
-              if(!result){
-                errors++;
-              }
-              bar.tick();
-            });
-        allTaskPromises.push(promise);
-      }
-    }
-    await Promise.all(allTaskPromises);
-    await pool.terminate();
-    if (errors > 0) {
-      console.error(`Experiment "${experiment_name}" completed with ${errors} errors.`);
-    }
-    else {
-      console.log(`Experiment "${experiment_name}" completed successfully.`);
-    }
-  } catch (error) {
+    const runner = new ExperimentRunner(experiment_name, num_workers, bar, pool);
+    await runner.run();
+  }
+  catch (error) {
     console.error(error);
   }
 }

@@ -8,7 +8,7 @@ CREATE TABLE Experiment(
     id int NOT NULL AUTO_INCREMENT,
     title VARCHAR(255) NOT NULL UNIQUE,
     iterations int NOT NULL DEFAULT 1,
-    datetime TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    datetime TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     total_requests INT NOT NULL DEFAULT 0,
     max_retry INT NOT NULL DEFAULT 0,
     threads INT NOT NULL DEFAULT 1,
@@ -135,6 +135,9 @@ CREATE TABLE Result(
     config_id INT NOT NULL,
     output_result TEXT NOT NULL,
     input_id INT NOT NULL,
+    start_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    end_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    total_tokens INT,
     CONSTRAINT PK_Result PRIMARY KEY (id),
     CONSTRAINT FK_config_id FOREIGN KEY (config_id) REFERENCES PromptConfig(id),
     CONSTRAINT FK_input_id_result FOREIGN KEY (input_id) REFERENCES Data_Input(id)
@@ -146,7 +149,8 @@ CREATE TABLE Error(
     input_id INT NOT NULL,
     error_message TEXT NOT NULL,
     error_code INT NOT NULL,
-    Datetime TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    start_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    end_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT PK_Error PRIMARY KEY (id),
     CONSTRAINT FK_config_id_error FOREIGN KEY (config_id) REFERENCES PromptConfig(id),
     CONSTRAINT FK_input_id_error FOREIGN KEY (input_id) REFERENCES Data_Input(id)

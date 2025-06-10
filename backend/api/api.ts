@@ -281,8 +281,8 @@ app.get('/marker/:id', async (req, res) => {
 // Save a response
 app.post('/result', async (req, res) => {
     try{
-        const {config_id, output_result, input_id} = req.body;
-        const response_id = await save_response(config_id, output_result, input_id);
+        const {config_id, output_result, input_id, start_time, end_time, total_tokens} = req.body;
+        const response_id = await save_response(config_id, output_result, input_id, start_time, end_time, total_tokens);
         res.status(201).json({ response_id });
     }
     catch (error) {
@@ -311,8 +311,8 @@ app.get('/last_input/:dataset_id', async (req, res) => {
 // Save an error
 app.post('/error', async (req, res) => {
     try{
-        const { config_id, error_message, error_status, input_id } = req.body;
-        const error_id = await save_error(config_id, error_message, error_status, input_id);
+        const { config_id, error_message, error_status, input_id, start_time, end_time } = req.body;
+        const error_id = await save_error(config_id, error_message, error_status, input_id, start_time, end_time);
         res.status(201).json({ error_id });
     }
     catch (error) {

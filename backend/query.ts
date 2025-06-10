@@ -455,7 +455,7 @@ export class PromptPipeline {
       // When/if we emerge from getting a response, check if this process has been canceled in the meantime:
       if (should_cancel && should_cancel()) throw new UserForcedPrematureExit();
     } catch (err) {
-      if (err instanceof UserForcedPrematureExit) throw err; // bubble cancels up
+      if (err instanceof UserForcedPrematureExit) throw err;// bubble cancels up
       return {
         prompt,
         query: undefined,

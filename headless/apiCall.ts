@@ -203,12 +203,15 @@ export async function get_marker_by_id(id: number): Promise<any>{
     }
 }
 
-export async function save_response(config_id: number, llm_response: string, input_id: number): Promise<number>{
+export async function save_response(config_id: number, llm_response: string, input_id: number, start_time: string, end_time: string, total_tokens: number): Promise<number>{
     try{
         const response = await axios.post(`${URL}/result`, {
             config_id,
             output_result: llm_response,
-            input_id
+            input_id,
+            start_time,
+            end_time,
+            total_tokens
         });
         return response.data.response_id;
     }
@@ -227,13 +230,15 @@ export async function get_last_input_id(dataset_id: number): Promise<number>{
     }
 }
 
-export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number): Promise<number>{
+export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number, start_time: string, end_time: string): Promise<number>{
     try{
         const response = await axios.post(`${URL}/error`, {
             config_id,
             error_message,
             error_status,
-            input_id
+            input_id,
+            start_time,
+            end_time
         });
         return response.data.error_id;
     }

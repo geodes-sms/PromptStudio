@@ -372,9 +372,9 @@ export async function get_marker_by_id(marker_id: number): Promise<string>{
   }
 }
 
-export async function save_response(config_id: number, output_result: string, input_id: number){
-  const sql = 'INSERT INTO result(config_id, output_result, input_id) VALUES (?, ?, ?)';
-  const values = [config_id, output_result, input_id];
+export async function save_response(config_id: number, output_result: string, input_id: number, start_time: string, end_time: string, total_tokens: number){
+  const sql = 'INSERT INTO result(config_id, output_result, input_id, start_time, end_time, total_tokens) VALUES (?, ?, ?, ?, ?, ?)';
+  const values = [config_id, output_result, input_id, start_time, end_time, total_tokens];
   try{
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
@@ -397,10 +397,10 @@ export async function get_last_input_id(dataset_id: number): Promise<number>{
   }
 }
 
-export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number): Promise<number>{
+export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number, start_time: Date, end_time: Date): Promise<number>{
   try{
-    const sql = 'INSERT INTO error(config_id, error_message, error_code, input_id) VALUES (?, ?, ?, ?)';
-    const values = [config_id, error_message, error_status, input_id];
+    const sql = 'INSERT INTO error(config_id, error_message, error_code, input_id, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)';
+    const values = [config_id, error_message, error_status, input_id, start_time, end_time];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
   }
