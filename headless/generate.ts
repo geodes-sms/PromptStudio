@@ -8,12 +8,10 @@ import {
   Evaluator,
   Llm_params,
   Promptconfig,
-  Input,
-  Result,
+  Experiment,
 } from "../backend/api/types";
 import {
   executejs,
-  queryLLM,
 } from "../backend/backend";
 import {
   LLMSpec,
@@ -35,10 +33,7 @@ import {
   get_template_by_id,
   get_dataset_by_id,
   get_next_input,
-  get_marker_by_id,
-  save_response,
   get_last_input_id,
-  save_error,
   get_results,
   get_dataset_by_name,
   get_llm_by_base_model,
@@ -49,6 +44,10 @@ import {
   get_results_by_config,
   get_evaluators_by_config,
   get_input_by_id,
+  update_promptconfig_dataset,
+  save_combination_as_input,
+  get_all_input_ids_from_dataset,
+  get_or_create_synthetic_dataset, get_results_by_template, get_config,
 } from "./apiCall";
 import { PromptPermutationGenerator } from "../backend/template";
 import {getTokenCount} from "./token";
@@ -82,14 +81,16 @@ export async function save_config(yml_file: string) {
       let templateCounter = 1;
 
       const evaluators_id: number[] = [];
-      for (const evaluator of config.evaluators as Evaluator[]) {
-        const existing = await get_evaluator_by_name(evaluator.name);
-        if (existing) {
-          evaluators_id.push(existing.id);
-        } else {
-          evaluator.code = await readFile(evaluator.file, "utf8");
-          const evaluator_id = await save_evaluator(evaluator);
-          evaluators_id.push(evaluator_id);
+      if (config.evaluators) {
+        for (const evaluator of config.evaluators as Evaluator[]) {
+          const existing = await get_evaluator_by_name(evaluator.name);
+          if (existing) {
+            evaluators_id.push(existing.id);
+          } else {
+            evaluator.code = await readFile(evaluator.file, "utf8");
+            const evaluator_id = await save_evaluator(evaluator);
+            evaluators_id.push(evaluator_id);
+          }
         }
       }
 
@@ -99,13 +100,18 @@ export async function save_config(yml_file: string) {
         existingTemplate = await get_template_by_name(templateName);
       }
 
-      const template_id = await save_template(template, templateName);
-      const dataset = config.dataset;
-      const existingDataset = await get_dataset_by_name(dataset.name);
+      const template_id = await save_template(template, templateName, config.template.vars);
 
-      const dataset_id = existingDataset
-          ? existingDataset.id
-          : await save_dataset(dataset.path, dataset.name, template_id);
+      let dataset_id: number;
+      if (config.dataset) {
+        const dataset = config.dataset;
+        const existingDataset = await get_dataset_by_name(dataset.name);
+        dataset_id = existingDataset
+            ? existingDataset.id
+            : await save_dataset(dataset.path, dataset.name, template_id);
+      } else {
+        dataset_id = null;
+      }
 
       for (const llm of config.llms as LLMSpec[]) {
         const existingLLM = await get_llm_by_base_model(llm.base_model);
@@ -167,7 +173,8 @@ export async function save_config(yml_file: string) {
 async function get_number_of_total_inputs(prompt_configs: Promptconfig[]) {
   let total_inputs = 0;
   for (const config of prompt_configs) {
-    total_inputs += await get_dataset_size(config.dataset_id);
+    const updatedConfig = await get_config(config.id);
+    total_inputs += await get_dataset_size(updatedConfig.dataset_id);
   }
   return total_inputs;
 }
@@ -211,34 +218,150 @@ export async function evaluate_experiment(experiment_name: string) {
   }
 }
 
-
-
-
-
-
 export async function run_experiment(experiment_name: string) {
-  try{
+  try {
     const experiment = await get_experiment_by_name(experiment_name);
     const prompt_configs = await get_prompt_config_by_experiment(experiment.id);
-    const total = await get_number_of_total_inputs(prompt_configs);
-    const bar = new ProgressBar("Processing LLM calls: [:bar] :percent :etas", { total });
 
-    const num_workers = experiment.threads || 1;
-    const pool = workerpool.pool(path.resolve(__dirname, 'worker.ts'), {
-      minWorkers: num_workers,
-      maxWorkers: num_workers,
-      workerType: "thread",
-      workerThreadOpts: {
-        execArgv: ['--require', 'tsx']
-      },
-    });
+    // Group configs
+    const independent: Promptconfig[] = [];
+    const dependent: Promptconfig[] = [];
 
-    const runner = new ExperimentRunner(experiment_name, num_workers, bar, pool);
-    await runner.run();
-  }
-  catch (error) {
+    const dependenciesByConfigId = new Map<number, Record<string, string>>();
+
+    for (const config of prompt_configs) {
+      const template = await get_template_by_id(config.prompt_template_id);
+      if (template.vars && Object.keys(template.vars).length > 0) {
+        dependent.push(config);
+        dependenciesByConfigId.set(config.id, template.vars);
+      } else {
+        independent.push(config);
+      }
+    }
+
+    await run_configs(experiment, independent);
+
+    for (const config of dependent) {
+      const deps = dependenciesByConfigId.get(config.id)!;
+      const dataset = await get_dataset_by_id(config.dataset_id);
+      
+      // Check if this config is already using a synthetic dataset
+      let synthetic_dataset_id: number;
+      let isAlreadySynthetic = false;
+      
+      if (dataset) {
+        // Check if the dataset name contains the dependency pattern (indicating it's synthetic)
+        const depValues = Object.values(deps);
+        isAlreadySynthetic = depValues.every(depValue => dataset.name.includes(`__${depValue}`));
+      }
+      
+      if (isAlreadySynthetic) {
+        // Already using a synthetic dataset, reuse it
+        synthetic_dataset_id = dataset.id;
+      } else {
+        // Either no dataset or using original dataset, get/create synthetic dataset
+        const originalDataset = dataset;
+        synthetic_dataset_id = await get_or_create_synthetic_dataset(
+            originalDataset?.name || 'synth',
+            Object.values(deps)
+        );
+        
+        // Update the config to use the synthetic dataset
+        await update_promptconfig_dataset(config.id, synthetic_dataset_id);
+        
+        // If we had an original dataset, generate combinations from it
+        if (originalDataset) {
+          const inputIds = await get_all_input_ids_from_dataset(originalDataset.id);
+          for (const input_id of inputIds) {
+            const baseInput = await get_input_by_id(input_id);
+            const baseMarkers = await get_marker_map(baseInput);
+
+            let combinations: PromptVarsDict[] = [{}];
+
+            for (const [varName, template_id] of Object.entries(deps)) {
+              const results = await get_results_by_template(template_id);
+
+              const newCombinations: PromptVarsDict[] = [];
+              for (const combo of combinations) {
+                for (const result of results) {
+                  newCombinations.push({ ...combo, [varName]: result.output_result });
+                }
+              }
+              combinations = newCombinations;
+            }
+
+            // Save combinations (duplicates will be handled by save_combination_as_input)
+            for (const combo of combinations) {
+              const fullMarkers = { ...combo, ...baseMarkers };
+              await save_combination_as_input(synthetic_dataset_id, config.id, fullMarkers);
+            }
+          }
+        } else {
+          // No original dataset, create combinations from dependencies only
+          let combinations: PromptVarsDict[] = [{}];
+          for (const [varName, template_id] of Object.entries(deps)) {
+            const results = await get_results_by_template(template_id);
+            const newCombinations: PromptVarsDict[] = [];
+            for (const combo of combinations) {
+              for (const result of results) {
+                newCombinations.push({ ...combo, [varName]: result.output_result });
+              }
+            }
+            combinations = newCombinations;
+          }
+
+          // Save combinations (duplicates will be handled by save_combination_as_input)
+          for (const combo of combinations) {
+            await save_combination_as_input(synthetic_dataset_id, config.id, combo);
+          }
+        }
+      }
+      
+      // Always check for new combinations from updated dependencies
+      if (isAlreadySynthetic) {
+        // For existing synthetic datasets, check if there are new dependency results to add
+        let newCombinations: PromptVarsDict[] = [{}];
+        for (const [varName, template_id] of Object.entries(deps)) {
+          const results = await get_results_by_template(template_id);
+          const newCombs: PromptVarsDict[] = [];
+          for (const combo of newCombinations) {
+            for (const result of results) {
+              newCombs.push({ ...combo, [varName]: result.output_result });
+            }
+          }
+          newCombinations = newCombs;
+        }
+
+        // Add any new combinations (save_combination_as_input handles duplicates)
+        for (const combo of newCombinations) {
+          await save_combination_as_input(synthetic_dataset_id, config.id, combo);
+        }
+      }
+      
+      await run_configs(experiment, [config]);
+    }
+
+  } catch (error) {
     console.error(error);
   }
+}
+
+async function run_configs(experiment: Experiment, configs: Promptconfig[]) {
+  const total = await get_number_of_total_inputs(configs);
+  const bar = new ProgressBar("Processing LLM calls: [:bar] :percent :etas", { total });
+
+  const num_workers = experiment.threads || 1;
+  const pool = workerpool.pool(path.resolve(__dirname, 'worker.ts'), {
+    minWorkers: num_workers,
+    maxWorkers: num_workers,
+    workerType: "thread",
+    workerThreadOpts: {
+      execArgv: ['--require', 'tsx']
+    },
+  });
+
+  const runner = new ExperimentRunner(experiment.title, num_workers, bar, pool, configs);
+  await runner.run();
 }
 
 export async function getTotalTokenCountForExperiment(experimentName: string): Promise<number> {
@@ -248,6 +371,9 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
     let totalTokens = 0;
 
     for (const config of prompt_configs) {
+      if (!config.dataset_id) {
+        continue;
+      }
       const dataset = await get_dataset_by_id(config.dataset_id);
       const llm = await get_llm_by_id(config.LLM_id);
       const llm_param = await get_llm_param_by_id(config.LLM_param_id);

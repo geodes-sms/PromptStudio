@@ -1,6 +1,5 @@
 // @ts-ignore
 import mysql from "mysql2/promise";
-import {readFile} from "fs/promises";
 import {
   Dataset,
   Evaluator,
@@ -12,7 +11,7 @@ import {
   Promptconfig,
   prompttemplate, Result
 } from "../api/types";
-import {LLMSpec} from "../typing";
+import {LLMSpec, PromptVarsDict} from "../typing";
 
 // @ts-ignore
 import fs from "fs";
@@ -29,14 +28,19 @@ export const pool = mysql.createPool({
 export async function save_dataset(file: string, name: string, template_id: number): Promise<number> {
   try {
     const sql_dataset = 'INSERT INTO Dataset(name) VALUES (?)';
+    const [result] = await pool.execute(sql_dataset, [name]);
+    const dataset_id = (result as any).insertId;
+    // If file path is empty, this is a synthetic dataset - skip file processing
+    if (!file || file.trim() === '') {
+      console.log('Created synthetic dataset (no file to process)');
+      return dataset_id;
+    }
+
     const sql_input = 'INSERT INTO data_input(dataset_id) VALUES (?)';
     const sql_input_marker = 'INSERT INTO input_marker(input_id, marker_values_id) VALUES (?, ?)';
     const sql_marker = 'INSERT INTO marker(marker, template_id) VALUES (?, ?)';
     const sql_marker_value = 'INSERT INTO marker_value(marker_id, value) VALUES (?, ?)';
     const sql_oracle = 'UPDATE data_input SET oracle = ? WHERE id = ?';
-
-    const [result] = await pool.execute(sql_dataset, [name]);
-    const dataset_id = (result as any).insertId;
 
     const markers_id: Record<string, number> = {};
 
@@ -71,11 +75,21 @@ export async function save_dataset(file: string, name: string, template_id: numb
   }
 }
 
-export async function save_template(template: string, name: string): Promise<number> {
+export async function save_template(template: string, name: string, vars: Record<string, string> = {}): Promise<number> {
   try {
     const sql = "INSERT INTO PromptTemplate(value, name) VALUES (?, ?)";
     const values = [template, name];
     const [result] = await pool.execute(sql, values);
+    const sql_sub_template = "INSERT INTO sub_template(main_template_id, sub_template_id, var_name) VALUES (?, ?, ?)";
+    const template_id = (result as any).insertId;
+    const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
+    for (const [var_name, var_value] of Object.entries(vars)) {
+        const [rows] = await pool.execute(sql_var_id, [var_value]);
+        if ((rows as any[]).length > 0) {
+            const sub_template_id = (rows as any[])[0].id;
+            await pool.execute(sql_sub_template, [template_id, sub_template_id, var_name]);
+        }
+    }
     return (result as any).insertId;
   } catch (error) {
     console.error(error);
@@ -246,12 +260,25 @@ export async function get_llm_param_by_id(llm_param_id: number): Promise<Llm_par
   }
 }
 
+async function get_subtemplate_vars(template_id: number): Promise<Record<string, string>>{
+  const sql_sub_template = 'SELECT sub_template_id, var_name FROM sub_template WHERE main_template_id = ?';
+  const [subRows] = await pool.execute(sql_sub_template, [template_id]);
+  const vars = {};
+  for (const row of subRows as any[]) {
+    vars[row.var_name] = row.sub_template_id;
+  }
+  return vars;
+}
+
 export async function get_template_by_name(name: string): Promise<prompttemplate>{
     try{
         const sql = 'SELECT * FROM PromptTemplate WHERE name = ?';
         const [rows] = await pool.execute(sql, [name]);
+        // Check if there is subtemplate and add them in the vars record
         if ((rows as any[]).length > 0) {
-        return (rows as prompttemplate[])[0];
+          const template = (rows as prompttemplate[])[0];
+          template.vars = await get_subtemplate_vars(template.id);
+          return template;
         }
         return undefined;
     }
@@ -264,10 +291,12 @@ export async function get_template_by_id(template_id: number): Promise<prompttem
   try {
     const sql = 'SELECT * FROM PromptTemplate WHERE id = ?';
     const [rows] = await pool.execute(sql, [template_id]);
+    // Check if there is subtemplate and add them in the vars record
     if ((rows as any[]).length > 0) {
-      return (rows as prompttemplate[])[0];
+      const template = (rows as prompttemplate[])[0];
+      template.vars = await get_subtemplate_vars(template.id);
+      return template;
     }
-    return undefined;
   } catch (error) {
     console.error(error);
   }
@@ -497,4 +526,166 @@ export async function get_evaluators_by_config(config_id: number): Promise<Evalu
         console.error(error);
         return [];
     }
+}
+export async function get_or_create_synthetic_dataset(
+    base_name: string,
+    dependency_templates: string[]
+): Promise<number> {
+  const synthetic_name = `${base_name}__${dependency_templates.join("__")}`;
+  const [rows] = await pool.execute(
+      "SELECT id FROM Dataset WHERE name = ?",
+      [synthetic_name]
+  );
+  if ((rows as any[]).length > 0) {
+    return (rows as any)[0].id;
+  }
+
+  const [result] = await pool.execute(
+      "INSERT INTO Dataset (name) VALUES (?)",
+      [synthetic_name]
+  );
+  return (result as any).insertId;
+}
+
+/**
+ * Saves a synthetic input row along with its associated marker values.
+ */
+export async function save_combination_as_input(
+    dataset_id: number,
+    config_id: number,
+    markers: PromptVarsDict
+): Promise<number> {
+  // 1. Get all input IDs for this dataset
+  const [inputRows] = await pool.execute(
+      "SELECT id FROM Data_Input WHERE dataset_id = ?",
+      [dataset_id]
+  );
+  const inputIds = (inputRows as any[]).map(row => row.id);
+
+  // 2. For each input, check if marker values match
+  for (const input_id of inputIds) {
+    const [markerRows] = await pool.execute(
+        `SELECT m.marker, mv.value
+         FROM input_marker im
+         JOIN marker_value mv ON im.marker_values_id = mv.id
+         JOIN marker m ON mv.marker_id = m.id
+         WHERE im.input_id = ?`,
+        [input_id]
+    );
+    const dbMarkers: Record<string, string> = {};
+    for (const row of markerRows as any[]) {
+      dbMarkers[row.marker] = row.value;
+    }
+    // Compare marker sets
+    if (
+        Object.keys(dbMarkers).length === Object.keys(markers).length &&
+        Object.entries(markers).every(([k, v]) => dbMarkers[k] === v)
+    ) {
+      // Duplicate found
+      return input_id;
+    }
+  }
+
+  // 3. If not found, insert
+  const [res] = await pool.execute(
+      "INSERT INTO Data_Input (dataset_id) VALUES (?)",
+      [dataset_id]
+  );
+  const input_id = (res as any).insertId;
+
+  const [configRows] = await pool.execute(
+      "SELECT prompt_template_id FROM PromptConfig WHERE id = ?",
+      [config_id]
+  );
+  const template_id = (configRows as any)[0].prompt_template_id;
+
+  for (const [marker, value] of Object.entries(markers)) {
+    const [markerRows] = await pool.execute(
+        "SELECT id FROM Marker WHERE marker = ? AND template_id = ?",
+        [marker, template_id]
+    );
+
+    let marker_id: number;
+    if ((markerRows as any[]).length === 0) {
+      const [insertMarker] = await pool.execute(
+          "INSERT INTO Marker (marker, template_id) VALUES (?, ?)",
+          [marker, template_id]
+      );
+      marker_id = (insertMarker as any).insertId;
+    } else {
+      marker_id = (markerRows as any)[0].id;
+    }
+
+    const [insertValue] = await pool.execute(
+        "INSERT INTO Marker_value (marker_id, value) VALUES (?, ?)",
+        [marker_id, value]
+    );
+    const marker_value_id = (insertValue as any).insertId;
+
+    await pool.execute(
+        "INSERT INTO Input_marker (input_id, marker_values_id) VALUES (?, ?)",
+        [input_id, marker_value_id]
+    );
+  }
+
+  return input_id;
+}
+
+export async function update_promptconfig_dataset(config_id: number, new_dataset_id: number) {
+  await pool.execute(
+      "UPDATE PromptConfig SET dataset_id = ? WHERE id = ?",
+      [new_dataset_id, config_id]
+  );
+}
+
+export async function get_all_input_ids_from_dataset(dataset_id: number): Promise<number[]> {
+  const [rows] = await pool.execute(
+      "SELECT id FROM Data_Input WHERE dataset_id = ? ORDER BY id ASC",
+      [dataset_id]
+  );
+  return (rows as any[]).map(row => row.id);
+}
+
+export async function save_sub_template(
+    template_id: number,
+    sub_template_id: number,
+    var_name: string
+): Promise<number> {
+    try {
+        const sql = 'INSERT INTO sub_template(main_template_id, sub_template_id, var_name) VALUES (?, ?, ?)';
+        const values = [template_id, sub_template_id, var_name];
+        const [result] = await pool.execute(sql, values);
+        return (result as any).insertId;
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+export async function get_results_by_template(template_id: string): Promise<Result[]> {
+  try {
+    const sql = `
+      SELECT r.* FROM result r
+      JOIN promptconfig pc ON r.config_id = pc.id
+      JOIN PromptTemplate pt ON pc.prompt_template_id = pt.id
+      WHERE pt.id = ?
+    `;
+    const [rows] = await pool.execute(sql, [template_id]);
+    return rows as Result[];
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+export async function get_config(config_id: number): Promise<Promptconfig> {
+  try {
+    const sql = 'SELECT * FROM promptconfig WHERE id = ?';
+    const [rows] = await pool.execute(sql, [config_id]);
+    if ((rows as any[]).length > 0) {
+      return (rows as Promptconfig[])[0];
+    }
+    return undefined;
+  } catch (error) {
+    console.error(error);
+  }
 }

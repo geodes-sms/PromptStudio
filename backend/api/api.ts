@@ -1,22 +1,39 @@
 // @ts-ignore
 import express from 'express';
 import {
-    get_dataset_by_id, get_dataset_by_name, get_dataset_size,
-    get_experiment_by_name, get_last_input_id, get_llm_by_base_model,
+    get_dataset_by_id,
+    get_dataset_by_name,
+    get_dataset_size,
+    get_experiment_by_name,
+    get_last_input_id,
+    get_llm_by_base_model,
     get_llm_by_id,
     get_llm_param_by_id,
     get_marker_by_id,
     get_next_input,
-    get_prompt_config_by_experiment, get_results,
-    get_template_by_id, get_template_by_name,
-    save_dataset, save_error, save_evaluator, save_evaluator_config,
+    get_prompt_config_by_experiment,
+    get_results,
+    get_template_by_id,
+    get_template_by_name,
+    save_dataset,
+    save_error,
+    save_evaluator,
+    save_evaluator_config,
     save_experiment,
     save_llm,
     save_llm_param,
     save_promptconfig,
     save_response,
     save_template,
-    get_evaluator_by_name, get_results_by_config, get_evaluators_by_config, get_input_by_id
+    get_evaluator_by_name,
+    get_results_by_config,
+    get_evaluators_by_config,
+    get_input_by_id,
+    update_promptconfig_dataset,
+    save_combination_as_input,
+    get_all_input_ids_from_dataset,
+    get_or_create_synthetic_dataset,
+    get_results_by_template_name, get_results_by_template, get_config
 } from "../database/database";
 // @ts-ignore
 import multer from 'multer';
@@ -35,7 +52,6 @@ app.post('/dataset/:name/:template_id', upload.single('file'), async (req, res) 
         const dataset_name = req.params.name;
         const template_id = req.params.template_id;
         const file_path = req.file.path;
-
         const dataset_id = await save_dataset(file_path, dataset_name, template_id);
 
         res.status(201).json({ dataset_id });
@@ -75,8 +91,8 @@ app.post('/promptconfig', async (req, res) => {
 // Save a template
 app.post('/template', async (req, res) => {
     try{
-        const { template, name } = req.body;
-        const template_id = await save_template(template, name);
+        const { template, name, vars } = req.body;
+        const template_id = await save_template(template, name, vars);
         res.status(201).json({ template_id });
     }
     catch (error) {
@@ -443,6 +459,83 @@ app.get('/input/:input_id', async (req, res) => {
             res.json(input);
         } else {
             res.status(404).json({ error: 'Input not found' });
+        }
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.put('/promptconfig/:config_id', async (req, res) => {
+    try{
+        const config_id = req.params.config_id;
+        const { dataset_id } = req.body;
+        await update_promptconfig_dataset(config_id, dataset_id);
+        res.status(200).json({ message: 'Prompt configuration updated successfully' });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.post('/input/combination', async (req, res) => {
+    try{
+        const { dataset_id, config_id, markers } = req.body;
+        const input_id = await save_combination_as_input(dataset_id, config_id, markers);
+        res.status(201).json({ input_id });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/inputs/:dataset_id', async (req, res) => {
+    try{
+        const dataset_id = req.params.dataset_id;
+        const input_ids = await get_all_input_ids_from_dataset(dataset_id);
+        res.json(input_ids);
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.post('/dataset/synthetic', async (req, res) => {
+    try{
+        const { base_name, dependencies } = req.body.params;
+        const dataset_id = await get_or_create_synthetic_dataset(base_name, dependencies);
+        res.status(201).json({ dataset_id });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/results/template/:template_id', async (req, res) => {
+    try{
+        const template_id = req.params.template_id;
+        const results = await get_results_by_template(template_id);
+        res.json(results);
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/promptconfig/:config_id', async (req, res) => {
+    try{
+        const config_id = req.params.config_id;
+        const config = await get_config(config_id);
+        if (config) {
+            res.json(config);
+        } else {
+            res.status(404).json({ error: 'Prompt configuration not found' });
         }
     }
     catch (error) {

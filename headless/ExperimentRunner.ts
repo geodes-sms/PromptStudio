@@ -1,14 +1,16 @@
 import {LLMSpec, PromptVarsDict} from "../backend/typing";
 import workerpool from "workerpool";
 import {
+    get_config,
     get_dataset_by_id,
     get_experiment_by_name, get_last_input_id,
     get_llm_by_id,
     get_llm_param_by_id, get_next_input,
-    get_prompt_config_by_experiment, get_results,
+    get_results,
     get_template_by_id
 } from "./apiCall";
 import {create_llm_spec, get_marker_map} from "./utils";
+import {Promptconfig} from "../backend/api/types";
 
 export type Task = {
     config_id: number,
@@ -30,7 +32,8 @@ export class ExperimentRunner {
         private experiment_name: string,
         private num_workers: number,
         private bar: ProgressBar,
-        private pool: workerpool.WorkerPool
+        private pool: workerpool.WorkerPool,
+        private configs: Promptconfig[]
     ) {}
 
     async run() {
@@ -49,13 +52,13 @@ export class ExperimentRunner {
 
     private async produceTasks() {
         const experiment = await get_experiment_by_name(this.experiment_name);
-        const prompt_configs = await get_prompt_config_by_experiment(experiment.id);
 
-        for (const config of prompt_configs) {
-            const llm = await get_llm_by_id(config.LLM_id);
-            const llm_param = await get_llm_param_by_id(config.LLM_param_id);
-            const template = await get_template_by_id(config.prompt_template_id);
-            const dataset = await get_dataset_by_id(config.dataset_id);
+        for (const config of this.configs) {
+            const updatedConfig = await get_config(config.id);
+            const llm = await get_llm_by_id(updatedConfig.LLM_id);
+            const llm_param = await get_llm_param_by_id(updatedConfig.LLM_param_id);
+            const template = await get_template_by_id(updatedConfig.prompt_template_id);
+            const dataset = await get_dataset_by_id(updatedConfig.dataset_id);
             const llm_spec = create_llm_spec(llm, llm_param);
 
             let input_id = 0;
@@ -71,7 +74,10 @@ export class ExperimentRunner {
                 let iterations = experiment.iterations;
                 const existing = await get_results(config.id, input_id);
                 if (existing?.length) iterations -= existing.length;
-                if (iterations <= 0) continue;
+                if (iterations <= 0){
+                    this.bar.tick();
+                    continue;
+                }
 
                 this.taskQueue.push({
                     config_id: config.id,

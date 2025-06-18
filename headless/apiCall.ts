@@ -13,15 +13,22 @@ import {
 import FormData from 'form-data';
 // @ts-ignore
 import fs from 'fs';
-import {LLMSpec} from "../backend/typing";
+import {LLMSpec, PromptVarsDict} from "../backend/typing";
+import {PassThrough} from "node:stream";
 
 const URL = "http://localhost:3000";
 
 export async function save_dataset(path: string, name: string, template_id: number): Promise<number>{
     try{
         const formData = new FormData();
-        formData.append('file', fs.createReadStream(path));
-        
+        if (path && fs.existsSync(path)) {
+            await formData.append('file', fs.createReadStream(path));
+        }
+        else{
+            const emptyStream = new PassThrough();
+            emptyStream.end();
+            formData.append('file', emptyStream, { filename: 'empty.csv' });
+        }
         const response = await axios.post(`${URL}/dataset/${name}/${template_id}`, formData, {
             headers: {
                 ...formData.getHeaders(),
@@ -64,11 +71,12 @@ export async function save_promptconfig(experiment_id: number, llm_id: number, l
     }
 }
 
-export async function save_template(template: string, name: string): Promise<number>{
+export async function save_template(template: string, name: string, vars?: Record<string, string>): Promise<number>{
     try{
         const response = await axios.post(`${URL}/template`, {
             template,
-            name
+            name,
+            vars
         });
         return response.data.template_id;
     }
@@ -340,6 +348,77 @@ export async function get_evaluators_by_config(config_id: number): Promise<Evalu
 export async function get_input_by_id(input_id: number): Promise<Input>{
     try{
         const response = await axios.get(`${URL}/input/${input_id}`);
+        return response.data;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function update_promptconfig_dataset(config_id: number, synthetic_dataset_id: number){
+    try{
+        const response = await axios.put(`${URL}/promptconfig/${config_id}`, {
+            dataset_id: synthetic_dataset_id
+        });
+        return response.data;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function save_combination_as_input(dataset_id: number, config_id: number, markers: PromptVarsDict){
+    try{
+        const response = await axios.post(`${URL}/input/combination`, {
+            dataset_id,
+            config_id,
+            markers
+        });
+        return response.data.input_id;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function get_all_input_ids_from_dataset(dataset_id: number){
+    try{
+        const response = await axios.get(`${URL}/inputs/${dataset_id}`);
+        return response.data;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function get_or_create_synthetic_dataset(base_name:string, dependencies: string[]){
+    try{
+        const response = await axios.post(`${URL}/dataset/synthetic`, {
+            params: {
+                base_name,
+                dependencies
+            }
+        });
+        return response.data.dataset_id;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function get_results_by_template(template_id: string): Promise<Result[]>{
+    try{
+        const response = await axios.get(`${URL}/results/template/${template_id}`);
+        return response.data;
+    }
+    catch (error) {
+        return [];
+    }
+}
+
+export async function get_config(config_id: number): Promise<Promptconfig> {
+    try{
+        const response = await axios.get(`${URL}/promptconfig/${config_id}`);
         return response.data;
     }
     catch (error) {

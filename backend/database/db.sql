@@ -63,6 +63,16 @@ CREATE TABLE PromptTemplate(
     CONSTRAINT PK_Prompt_Template PRIMARY KEY (id)
 );
 
+CREATE TABLE sub_template(
+    id INT NOT NULL AUTO_INCREMENT,
+    main_template_id INT NOT NULL,
+    sub_template_id INT NOT NULL,
+    var_name varchar(255) NOT NULL,
+    CONSTRAINT PK_Sub_Template PRIMARY KEY (id),
+    CONSTRAINT FK_main_template_id FOREIGN KEY (main_template_id) REFERENCES PromptTemplate(id),
+    CONSTRAINT FK_sub_template_id FOREIGN KEY (sub_template_id) REFERENCES PromptTemplate(id)
+);
+
 CREATE INDEX idx_prompt_template_name ON PromptTemplate(name);
 
 CREATE TABLE Marker(
@@ -104,7 +114,7 @@ CREATE TABLE PromptConfig(
     LLM_id int NOT NULL,
     LLM_param_id INT NOT NULL,
     prompt_template_id INT NOT NULL,
-    dataset_id INT NOT NULL,
+    dataset_id INT,
     CONSTRAINT PK_PromptConfig PRIMARY KEY (id),
     CONSTRAINT FK_experiment_id FOREIGN KEY (experiment_id) REFERENCES Experiment(id),
     CONSTRAINT FK_LLM_id FOREIGN KEY (LLM_id) REFERENCES Llm(id),

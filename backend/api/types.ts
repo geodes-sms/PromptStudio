@@ -55,6 +55,7 @@ export type prompttemplate = {
   id : number;
   value: string;
   name: string;
+  vars?: Record<string, string>;
 }
 
 export type Llm = {
