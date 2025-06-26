@@ -44,10 +44,14 @@ import {
   get_results_by_config,
   get_evaluators_by_config,
   get_input_by_id,
-  update_promptconfig_dataset,
   save_combination_as_input,
   get_all_input_ids_from_dataset,
-  get_or_create_synthetic_dataset, get_results_by_template, get_config,
+  get_results_by_template,
+  update_template_vars,
+  save_config_base_dataset,
+  get_base_datasets_for_config,
+  update_promptconfig_final_dataset,
+  get_config,
 } from "./apiCall";
 import { PromptPermutationGenerator } from "../backend/template";
 import {getTokenCount} from "./token";
@@ -55,6 +59,41 @@ import * as path from "node:path";
 import workerpool from "workerpool";
 import {ExperimentRunner} from "./ExperimentRunner";
 import {create_llm_spec, get_marker_map} from "./utils";
+
+function hasCycle(graph: Map<string, string[]>): boolean {
+  const visited = new Set<string>();
+  const recStack = new Set<string>();
+
+  function dfs(node: string): boolean {
+    if (!visited.has(node)) {
+      visited.add(node);
+      recStack.add(node);
+
+      for (const neighbor of graph.get(node) || []) {
+        if (!graph.has(neighbor)) {
+          throw new Error(`Template dependency error: '${node}' depends on unknown template '${neighbor}'`);
+        }
+
+        if (!visited.has(neighbor) && dfs(neighbor)) {
+          return true;
+        } else if (recStack.has(neighbor)) {
+          return true;
+        }
+      }
+    }
+    recStack.delete(node);
+    return false;
+  }
+
+  // @ts-ignore
+  for (const node of graph.keys()) {
+    if (dfs(node)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 export async function save_config(yml_file: string) {
   try {
@@ -75,24 +114,31 @@ export async function save_config(yml_file: string) {
       title: experimentName,
     });
 
+    const templateIdByName = new Map<string, number>();
+
+    // Build dependency graph for templates
+    const templateDeps = new Map<string, string[]>();
+
+    for (const config of parsed.configs) {
+      const templateName = config.template.name;
+
+      if (config.template.vars && Object.keys(config.template.vars).length > 0) {
+        const deps: string[] = Object.values(config.template.vars);
+        templateDeps.set(templateName, deps);
+      } else {
+        templateDeps.set(templateName, []);
+      }
+    }
+
+    if (hasCycle(templateDeps)) {
+      throw new Error("Invalid YAML: cyclic dependency detected between templates!");
+    }
+
+    // Pass 1: save all templates
     for (const config of parsed.configs) {
       const template = config.template.value;
       let templateName = config.template.name;
       let templateCounter = 1;
-
-      const evaluators_id: number[] = [];
-      if (config.evaluators) {
-        for (const evaluator of config.evaluators as Evaluator[]) {
-          const existing = await get_evaluator_by_name(evaluator.name);
-          if (existing) {
-            evaluators_id.push(existing.id);
-          } else {
-            evaluator.code = await readFile(evaluator.file, "utf8");
-            const evaluator_id = await save_evaluator(evaluator);
-            evaluators_id.push(evaluator_id);
-          }
-        }
-      }
 
       let existingTemplate = await get_template_by_name(templateName);
       while (existingTemplate) {
@@ -100,17 +146,29 @@ export async function save_config(yml_file: string) {
         existingTemplate = await get_template_by_name(templateName);
       }
 
-      const template_id = await save_template(template, templateName, config.template.vars);
+      const template_id = await save_template(template, templateName, {}); // Save empty vars because some of them might not exist yet
+      templateIdByName.set(config.template.name, template_id);
+    }
 
-      let dataset_id: number;
-      if (config.dataset) {
-        const dataset = config.dataset;
-        const existingDataset = await get_dataset_by_name(dataset.name);
-        dataset_id = existingDataset
-            ? existingDataset.id
-            : await save_dataset(dataset.path, dataset.name, template_id);
-      } else {
-        dataset_id = null;
+    // Pass 2: save configs
+    for (const config of parsed.configs) {
+      const template_id = templateIdByName.get(config.template.name);
+
+      // Update the vars for all templates since all template have been created
+      await update_template_vars(template_id, config.template.vars);
+
+      const evaluators_id: number[] = [];
+      if (config.evaluators) {
+        for (const evaluator of config.evaluators as Evaluator[]) {
+          const existing = await get_evaluator_by_name(evaluator.name);
+          const evaluator_id = existing
+              ? existing.id
+              : await save_evaluator({
+                ...evaluator,
+                code: await readFile(evaluator.file, "utf8"),
+              });
+          evaluators_id.push(evaluator_id);
+        }
       }
 
       for (const llm of config.llms as LLMSpec[]) {
@@ -150,31 +208,45 @@ export async function save_config(yml_file: string) {
         }
 
         const llm_param_id = await save_llm_param(llm_params);
+
+        const final_dataset_id = null;
         const config_id = await save_promptconfig(
             experiment_id,
             llm_id,
             llm_param_id,
             template_id,
-            dataset_id
+            final_dataset_id
         );
+
+        if (config.datasets && Array.isArray(config.datasets)) {
+          for (const dataset of config.datasets) {
+            const existingDataset = await get_dataset_by_name(dataset.name);
+            const dataset_id = existingDataset
+                ? existingDataset.id
+                : await save_dataset(dataset.path, dataset.name, template_id);
+
+            await save_config_base_dataset(config_id, dataset_id);
+          }
+        }
 
         for (const evaluator_id of evaluators_id) {
           await save_evaluator_config(evaluator_id, config_id);
         }
       }
     }
-
     return experimentName;
   } catch (error) {
     console.error(error);
   }
 }
 
-async function get_number_of_total_inputs(prompt_configs: Promptconfig[]) {
+export async function get_number_of_total_inputs(prompt_configs: Promptconfig[]) {
   let total_inputs = 0;
   for (const config of prompt_configs) {
-    const updatedConfig = await get_config(config.id);
-    total_inputs += await get_dataset_size(updatedConfig.dataset_id);
+    const updated_config = await get_config(config.id);
+    if (updated_config.final_dataset_id) {
+      total_inputs += await get_dataset_size(updated_config.final_dataset_id);
+    }
   }
   return total_inputs;
 }
@@ -218,129 +290,166 @@ export async function evaluate_experiment(experiment_name: string) {
   }
 }
 
+async function prepare_config(experiment: Experiment, config: Promptconfig, deps: Record<string, string>) {
+  const base_datasets = await get_base_datasets_for_config(config.id);
+
+  const datasets = [];
+  for (const ds of base_datasets) {
+    const dataset = await get_dataset_by_id(ds);
+    if (dataset) datasets.push(dataset);
+  }
+
+  const datasetIds = base_datasets.map(d => d).sort((a,b) => a - b).join('_');
+
+  const synthetic_dataset_name = `synth_${experiment.title}_template${config.prompt_template_id}_datasets${datasetIds}`;
+
+  let synthetic_dataset = await get_dataset_by_name(synthetic_dataset_name);
+
+  let synthetic_dataset_id: number;
+
+  if (synthetic_dataset) {
+    synthetic_dataset_id = synthetic_dataset.id;
+  } else {
+    synthetic_dataset_id = await save_dataset(synthetic_dataset_name, synthetic_dataset_name, config.prompt_template_id);
+  }
+
+  await update_promptconfig_final_dataset(config.id, synthetic_dataset_id);
+
+  const datasetInputs: PromptVarsDict[][] = [];
+
+  for (const ds of datasets) {
+    const inputIds = await get_all_input_ids_from_dataset(ds.id);
+    const markersForDataset: PromptVarsDict[] = [];
+
+    for (const input_id of inputIds) {
+      const input = await get_input_by_id(input_id);
+      const markers = await get_marker_map(input);
+      markersForDataset.push(markers);
+    }
+
+    datasetInputs.push(markersForDataset);
+  }
+
+  const productOfInputs = cartesianProduct(datasetInputs);
+
+  for (const baseMarkersList of productOfInputs) {
+    const mergedBaseMarkers = Object.assign({}, ...baseMarkersList);
+
+    let combinations: PromptVarsDict[] = [{}];
+    for (const [varName, template_id] of Object.entries(deps)) {
+      const results = await get_results_by_template(template_id);
+      const newCombinations: PromptVarsDict[] = [];
+      for (const combo of combinations) {
+        for (const result of results) {
+          newCombinations.push({ ...combo, [varName]: result.output_result });
+        }
+      }
+      combinations = newCombinations;
+    }
+
+    for (const combo of combinations) {
+      const fullMarkers = { ...combo, ...mergedBaseMarkers };
+      await save_combination_as_input(synthetic_dataset_id, config.id, fullMarkers);
+    }
+  }
+}
+
+
 export async function run_experiment(experiment_name: string) {
   try {
     const experiment = await get_experiment_by_name(experiment_name);
     const prompt_configs = await get_prompt_config_by_experiment(experiment.id);
 
-    // Group configs
     const independent: Promptconfig[] = [];
     const dependent: Promptconfig[] = [];
 
     const dependenciesByConfigId = new Map<number, Record<string, string>>();
+    const configById = new Map<number, Promptconfig>();
+
+    const synthetic_done = new Set<string>();
 
     for (const config of prompt_configs) {
       const template = await get_template_by_id(config.prompt_template_id);
+      configById.set(config.id, config);
+
+      const base_datasets = await get_base_datasets_for_config(config.id);
+
       if (template.vars && Object.keys(template.vars).length > 0) {
         dependent.push(config);
         dependenciesByConfigId.set(config.id, template.vars);
-      } else {
+      } else if (base_datasets.length === 1) {
+        await update_promptconfig_final_dataset(config.id, base_datasets[0]);
         independent.push(config);
+      } else if (base_datasets.length > 1) {
+        const datasetIds = base_datasets.map(d => d).sort((a,b) => a - b).join('_');
+        const synthetic_key = `template${config.prompt_template_id}_datasets${datasetIds}`;
+
+        const synthetic_dataset_name = `synth_${experiment.title}_template${config.prompt_template_id}_datasets${datasetIds}`;
+
+        let synthetic_dataset = await get_dataset_by_name(synthetic_dataset_name);
+        let synthetic_dataset_id: number;
+
+        if (synthetic_dataset) {
+          synthetic_dataset_id = synthetic_dataset.id;
+        } else {
+          if (!synthetic_done.has(synthetic_key)) {
+            await prepare_config(experiment, config, {});
+            synthetic_done.add(synthetic_key);
+          }
+
+          synthetic_dataset = await get_dataset_by_name(synthetic_dataset_name);
+          synthetic_dataset_id = synthetic_dataset.id;
+        }
+
+        await update_promptconfig_final_dataset(config.id, synthetic_dataset_id);
+        independent.push(config);
+      } else {
+        console.warn(`Config ${config.id}: no datasets found! Skipping`);
       }
     }
 
     await run_configs(experiment, independent);
 
-    for (const config of dependent) {
-      const deps = dependenciesByConfigId.get(config.id)!;
-      const dataset = await get_dataset_by_id(config.dataset_id);
-      
-      // Check if this config is already using a synthetic dataset
-      let synthetic_dataset_id: number;
-      let isAlreadySynthetic = false;
-      
-      if (dataset) {
-        // Check if the dataset name contains the dependency pattern (indicating it's synthetic)
-        const depValues = Object.values(deps);
-        isAlreadySynthetic = depValues.every(depValue => dataset.name.includes(`__${depValue}`));
-      }
-      
-      if (isAlreadySynthetic) {
-        // Already using a synthetic dataset, reuse it
-        synthetic_dataset_id = dataset.id;
-      } else {
-        // Either no dataset or using original dataset, get/create synthetic dataset
-        const originalDataset = dataset;
-        synthetic_dataset_id = await get_or_create_synthetic_dataset(
-            originalDataset?.name || 'synth',
-            Object.values(deps)
-        );
-        
-        // Update the config to use the synthetic dataset
-        await update_promptconfig_dataset(config.id, synthetic_dataset_id);
-        
-        // If we had an original dataset, generate combinations from it
-        if (originalDataset) {
-          const inputIds = await get_all_input_ids_from_dataset(originalDataset.id);
-          for (const input_id of inputIds) {
-            const baseInput = await get_input_by_id(input_id);
-            const baseMarkers = await get_marker_map(baseInput);
-
-            let combinations: PromptVarsDict[] = [{}];
-
-            for (const [varName, template_id] of Object.entries(deps)) {
-              const results = await get_results_by_template(template_id);
-
-              const newCombinations: PromptVarsDict[] = [];
-              for (const combo of combinations) {
-                for (const result of results) {
-                  newCombinations.push({ ...combo, [varName]: result.output_result });
-                }
-              }
-              combinations = newCombinations;
-            }
-
-            // Save combinations (duplicates will be handled by save_combination_as_input)
-            for (const combo of combinations) {
-              const fullMarkers = { ...combo, ...baseMarkers };
-              await save_combination_as_input(synthetic_dataset_id, config.id, fullMarkers);
-            }
-          }
-        } else {
-          // No original dataset, create combinations from dependencies only
-          let combinations: PromptVarsDict[] = [{}];
-          for (const [varName, template_id] of Object.entries(deps)) {
-            const results = await get_results_by_template(template_id);
-            const newCombinations: PromptVarsDict[] = [];
-            for (const combo of combinations) {
-              for (const result of results) {
-                newCombinations.push({ ...combo, [varName]: result.output_result });
-              }
-            }
-            combinations = newCombinations;
-          }
-
-          // Save combinations (duplicates will be handled by save_combination_as_input)
-          for (const combo of combinations) {
-            await save_combination_as_input(synthetic_dataset_id, config.id, combo);
-          }
-        }
-      }
-      
-      // Always check for new combinations from updated dependencies
-      if (isAlreadySynthetic) {
-        // For existing synthetic datasets, check if there are new dependency results to add
-        let newCombinations: PromptVarsDict[] = [{}];
-        for (const [varName, template_id] of Object.entries(deps)) {
-          const results = await get_results_by_template(template_id);
-          const newCombs: PromptVarsDict[] = [];
-          for (const combo of newCombinations) {
-            for (const result of results) {
-              newCombs.push({ ...combo, [varName]: result.output_result });
-            }
-          }
-          newCombinations = newCombs;
-        }
-
-        // Add any new combinations (save_combination_as_input handles duplicates)
-        for (const combo of newCombinations) {
-          await save_combination_as_input(synthetic_dataset_id, config.id, combo);
-        }
-      }
-      
-      await run_configs(experiment, [config]);
+    const doneTemplates = new Set<number>();
+    for (const config of independent) {
+      const template = await get_template_by_id(config.prompt_template_id);
+      doneTemplates.add(template.id);
     }
 
+    const remaining = new Set(dependent.map((cfg) => cfg.id));
+    let progress = true;
+
+    while (remaining.size > 0 && progress) {
+      progress = false;
+
+      for (const configId of Array.from(remaining)) {
+        const config = configById.get(configId)!;
+        const deps = dependenciesByConfigId.get(config.id)!;
+        const depTemplateIds = Object.values(deps).map((x) => Number(x));
+
+        const depsSatisfied = depTemplateIds.every((depId) => doneTemplates.has(depId));
+
+        if (depsSatisfied) {
+          console.log(`Running config ${config.id} after dependencies satisfied.`);
+
+          await prepare_config(experiment, config, deps);
+          await run_configs(experiment, [config]);
+
+          const template = await get_template_by_id(config.prompt_template_id);
+          doneTemplates.add(template.id);
+          remaining.delete(config.id);
+          progress = true;
+        }
+      }
+
+      if (!progress && remaining.size > 0) {
+        console.error(
+            "Cyclic or unsatisfiable dependencies detected! Remaining configs:",
+            Array.from(remaining)
+        );
+        throw new Error("Dependency resolution failed — cannot run experiment.");
+      }
+    }
   } catch (error) {
     console.error(error);
   }
@@ -371,10 +480,10 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
     let totalTokens = 0;
 
     for (const config of prompt_configs) {
-      if (!config.dataset_id) {
+      if (!config.final_dataset_id) {
         continue;
       }
-      const dataset = await get_dataset_by_id(config.dataset_id);
+      const dataset = await get_dataset_by_id(config.final_dataset_id);
       const llm = await get_llm_by_id(config.LLM_id);
       const llm_param = await get_llm_param_by_id(config.LLM_param_id);
       const template = await get_template_by_id(config.prompt_template_id);
@@ -411,5 +520,14 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
     return totalTokens;
   } catch (error) {
     console.error("Error computing total token count:", error);
+    return 0;
   }
+}
+
+function cartesianProduct<T>(arrays: T[][]): T[][] {
+  return arrays.reduce<T[][]>(
+      (acc, curr) =>
+          acc.flatMap(a => curr.map(b => [...a, b])),
+      [[]]
+  );
 }

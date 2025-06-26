@@ -1,8 +1,3 @@
-import Dict = NodeJS.Dict;
-import {JSONCompatible} from "../typing";
-
-export type MarkerMap = Record<string, string[]>;
-
 export type Experiment = {
   id: number;
   title: string;
@@ -17,7 +12,8 @@ export type Promptconfig = {
   LLM_id: number;
   LLM_param_id: number;
   prompt_template_id: number;
-  dataset_id: number;
+  final_dataset_id: number;
+  datasets: number[];
 };
 
 export enum Eval_type {
@@ -32,12 +28,6 @@ export type Evaluator = {
   file?: string;
   code?: string;
   name: string;
-};
-
-export type Marker = {
-  id: number;
-  marker: string;
-  template_id: number;
 };
 
 export type MarkerValue = {

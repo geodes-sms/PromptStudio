@@ -29,11 +29,15 @@ import {
     get_results_by_config,
     get_evaluators_by_config,
     get_input_by_id,
-    update_promptconfig_dataset,
+    update_promptconfig_final_dataset,
     save_combination_as_input,
     get_all_input_ids_from_dataset,
     get_or_create_synthetic_dataset,
-    get_results_by_template_name, get_results_by_template, get_config
+    get_results_by_template,
+    get_config,
+    update_template_vars,
+    add_config_base_dataset,
+    get_base_datasets
 } from "../database/database";
 // @ts-ignore
 import multer from 'multer';
@@ -471,7 +475,7 @@ app.put('/promptconfig/:config_id', async (req, res) => {
     try{
         const config_id = req.params.config_id;
         const { dataset_id } = req.body;
-        await update_promptconfig_dataset(config_id, dataset_id);
+        await update_promptconfig_final_dataset(config_id, dataset_id);
         res.status(200).json({ message: 'Prompt configuration updated successfully' });
     }
     catch (error) {
@@ -537,6 +541,43 @@ app.get('/promptconfig/:config_id', async (req, res) => {
         } else {
             res.status(404).json({ error: 'Prompt configuration not found' });
         }
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.put('/template/:template_id', async (req, res) => {
+    try{
+        const template_id = req.params.template_id;
+        const { vars } = req.body;
+        await update_template_vars(template_id, vars);
+        res.json({message: 'Template vars updated'});
+    }
+    catch(error){
+        console.error(error);
+        res.status(500).json({error: 'Internal Server Error'});
+    }
+})
+
+app.post('/config_base_dataset', async (req, res) => {
+    try{
+        const { config_id, dataset_id } = req.body;
+        await add_config_base_dataset(config_id, dataset_id);
+        res.status(200).json({ message: 'Configuration base dataset updated successfully' });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/config_base_dataset/:config_id', async (req, res) => {
+    try{
+        const config_id = req.params.config_id;
+        const base_datasets = await get_base_datasets(config_id);
+        res.json(base_datasets);
     }
     catch (error) {
         console.error(error);

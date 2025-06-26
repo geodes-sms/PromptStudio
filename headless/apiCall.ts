@@ -355,7 +355,7 @@ export async function get_input_by_id(input_id: number): Promise<Input>{
     }
 }
 
-export async function update_promptconfig_dataset(config_id: number, synthetic_dataset_id: number){
+export async function update_promptconfig_final_dataset(config_id: number, synthetic_dataset_id: number){
     try{
         const response = await axios.put(`${URL}/promptconfig/${config_id}`, {
             dataset_id: synthetic_dataset_id
@@ -423,5 +423,39 @@ export async function get_config(config_id: number): Promise<Promptconfig> {
     }
     catch (error) {
         return;
+    }
+}
+
+export async function update_template_vars(template_id: number, vars?: Record<string, string>){
+    try{
+        const response = await axios.put(`${URL}/template/${template_id}`, {
+            vars
+        });
+        return response.data;
+    }
+    catch (error) {
+        return;
+    }
+}
+
+export async function save_config_base_dataset(config_id: number, dataset_id: number): Promise<void> {
+    try {
+        const response = await axios.post(`${URL}/config_base_dataset`, {
+            config_id,
+            dataset_id
+        });
+        return response.data;
+    } catch (error) {
+        return;
+    }
+}
+
+export async function get_base_datasets_for_config(config_id: number): Promise<number[]> {
+    try {
+        const response = await axios.get(`${URL}/config_base_dataset/${config_id}`);
+        return response.data; // should return array of { dataset_id }
+    } catch (error) {
+        console.error('Failed to get base datasets:', error);
+        return [];
     }
 }

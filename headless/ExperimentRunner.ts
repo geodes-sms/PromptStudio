@@ -1,19 +1,21 @@
-import {LLMSpec, PromptVarsDict} from "../backend/typing";
+import { LLMSpec, PromptVarsDict } from "../backend/typing";
 import workerpool from "workerpool";
 import {
     get_config,
     get_dataset_by_id,
-    get_experiment_by_name, get_last_input_id,
+    get_experiment_by_name,
+    get_last_input_id,
     get_llm_by_id,
-    get_llm_param_by_id, get_next_input,
+    get_llm_param_by_id,
+    get_next_input,
     get_results,
     get_template_by_id
 } from "./apiCall";
-import {create_llm_spec, get_marker_map} from "./utils";
-import {Promptconfig} from "../backend/api/types";
+import { create_llm_spec, get_marker_map } from "./utils";
+import { Promptconfig } from "../backend/api/types";
 
 export type Task = {
-    config_id: number,
+    config_id: number;
     llm_spec: LLMSpec;
     iterations: number;
     template_value: string;
@@ -21,10 +23,11 @@ export type Task = {
     max_retry: number;
     input_id: number;
     tries: number;
-}
+};
 
 export class ExperimentRunner {
     private taskQueue: Task[] = [];
+    private failedQueue: Map<number, Task[]> = new Map();
     private isProducing = true;
     private errors = 0;
 
@@ -58,7 +61,7 @@ export class ExperimentRunner {
             const llm = await get_llm_by_id(updatedConfig.LLM_id);
             const llm_param = await get_llm_param_by_id(updatedConfig.LLM_param_id);
             const template = await get_template_by_id(updatedConfig.prompt_template_id);
-            const dataset = await get_dataset_by_id(updatedConfig.dataset_id);
+            const dataset = await get_dataset_by_id(updatedConfig.final_dataset_id);
             const llm_spec = create_llm_spec(llm, llm_param);
 
             let input_id = 0;
@@ -74,7 +77,7 @@ export class ExperimentRunner {
                 let iterations = experiment.iterations;
                 const existing = await get_results(config.id, input_id);
                 if (existing?.length) iterations -= existing.length;
-                if (iterations <= 0){
+                if (iterations <= 0) {
                     this.bar.tick();
                     continue;
                 }
@@ -101,13 +104,31 @@ export class ExperimentRunner {
 
     private async taskRunner() {
         const experiment = await get_experiment_by_name(this.experiment_name);
-        while (this.isProducing || this.taskQueue.length > 0) {
-            const task = this.taskQueue.shift();
+        while (this.isProducing || this.taskQueue.length > 0 || this.failedQueue.size > 0) {
+            let task: Task | undefined;
+
+            // Prioritize main queue
+            if (this.taskQueue.length > 0) {
+                task = this.taskQueue.shift();
+            } else if (!this.isProducing && this.failedQueue.size > 0) {
+                // find the lowest available tries bucket
+                const sortedTries = Array.from(this.failedQueue.keys()).sort((a, b) => a - b);
+                for (const tries of sortedTries) {
+                    const bucket = this.failedQueue.get(tries);
+                    if (bucket && bucket.length > 0) {
+                        task = bucket.shift();
+                        if (bucket.length === 0) {
+                            this.failedQueue.delete(tries);
+                        }
+                        break;
+                    }
+                }
+            }
+
             if (!task) {
                 await new Promise((res) => setTimeout(res, 50));
                 continue;
             }
-
             await this.submitTask(task, experiment.max_retry);
         }
     }
@@ -124,8 +145,11 @@ export class ExperimentRunner {
             task.tries
         ]);
 
-        if (!result.success && result.tries < experimentMaxRetry) {
-            this.taskQueue.push({ ...task, tries: result.tries });
+        if (!result.success && result.tries <= experimentMaxRetry) {
+            // Push to failed queue, organized by tries
+            const triesBucket = this.failedQueue.get(result.tries) ?? [];
+            triesBucket.push({ ...task, tries: result.tries });
+            this.failedQueue.set(result.tries, triesBucket);
         } else if (!result.success) {
             this.errors++;
             this.bar.tick();

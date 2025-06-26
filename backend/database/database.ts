@@ -17,6 +17,8 @@ import {LLMSpec, PromptVarsDict} from "../typing";
 import fs from "fs";
 import {parse} from "csv-parse";
 
+import crypto from "crypto";
+
 export const pool = mysql.createPool({
   host: "localhost",
   user: "root",
@@ -30,7 +32,7 @@ export async function save_dataset(file: string, name: string, template_id: numb
     const sql_dataset = 'INSERT INTO Dataset(name) VALUES (?)';
     const [result] = await pool.execute(sql_dataset, [name]);
     const dataset_id = (result as any).insertId;
-    // If file path is empty, this is a synthetic dataset - skip file processing
+
     if (!file || file.trim() === '') {
       console.log('Created synthetic dataset (no file to process)');
       return dataset_id;
@@ -43,7 +45,6 @@ export async function save_dataset(file: string, name: string, template_id: numb
     const sql_oracle = 'UPDATE data_input SET oracle = ? WHERE id = ?';
 
     const markers_id: Record<string, number> = {};
-
     const parser = fs.createReadStream(file).pipe(parse({ columns: true, trim: true }));
 
     for await (const row of parser) {
@@ -51,17 +52,37 @@ export async function save_dataset(file: string, name: string, template_id: numb
       const input_id = (resInput as any).insertId;
 
       for (const marker of Object.keys(row)) {
-        if (marker === 'oracle'){
+        if (marker === 'oracle') {
           await pool.execute(sql_oracle, [row[marker], input_id]);
           continue;
         }
+
+        // Get or insert marker
         if (!(marker in markers_id)) {
           const [resMarker] = await pool.execute(sql_marker, [marker, template_id]);
           markers_id[marker] = (resMarker as any).insertId;
         }
 
-        const [resMarkerVal] = await pool.execute(sql_marker_value, [markers_id[marker], row[marker]]);
-        const marker_value_id = (resMarkerVal as any).insertId;
+        const marker_id = markers_id[marker];
+        const value = row[marker];
+        const hash = computeMarkerValueHash(marker_id, value);
+
+        // Get or insert marker_value by hash
+        const [valueRows] = await pool.execute(
+            "SELECT id FROM marker_value WHERE marker_id = ? AND hash = ?",
+            [marker_id, hash]
+        );
+
+        let marker_value_id: number;
+        if ((valueRows as any[]).length === 0) {
+          const [resMarkerVal] = await pool.execute(
+              sql_marker_value,
+              [marker_id, value]
+          );
+          marker_value_id = (resMarkerVal as any).insertId;
+        } else {
+          marker_value_id = (valueRows as any)[0].id;
+        }
 
         await pool.execute(sql_input_marker, [input_id, marker_value_id]);
       }
@@ -80,14 +101,13 @@ export async function save_template(template: string, name: string, vars: Record
     const sql = "INSERT INTO PromptTemplate(value, name) VALUES (?, ?)";
     const values = [template, name];
     const [result] = await pool.execute(sql, values);
-    const sql_sub_template = "INSERT INTO sub_template(main_template_id, sub_template_id, var_name) VALUES (?, ?, ?)";
     const template_id = (result as any).insertId;
     const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
     for (const [var_name, var_value] of Object.entries(vars)) {
         const [rows] = await pool.execute(sql_var_id, [var_value]);
         if ((rows as any[]).length > 0) {
             const sub_template_id = (rows as any[])[0].id;
-            await pool.execute(sql_sub_template, [template_id, sub_template_id, var_name]);
+            await save_sub_template(template_id, sub_template_id, var_name);
         }
     }
     return (result as any).insertId;
@@ -186,7 +206,7 @@ export async function save_llm_param(llm_params: Partial<Llm_params>): Promise<n
 
 export async function save_promptconfig(experiment_id: number, llm_id: number, llm_param_id: number, template_id: number, dataset_id: number): Promise<number>{
   try{
-    const sql = 'INSERT INTO promptconfig(experiment_id, llm_id, llm_param_id, prompt_template_id, dataset_id) VALUES (?, ?, ?, ?, ?)';
+    const sql = 'INSERT INTO promptconfig(experiment_id, llm_id, llm_param_id, prompt_template_id, final_dataset_id) VALUES (?, ?, ?, ?, ?)';
     const values = [experiment_id, llm_id, llm_param_id, template_id, dataset_id];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
@@ -566,9 +586,9 @@ export async function save_combination_as_input(
   for (const input_id of inputIds) {
     const [markerRows] = await pool.execute(
         `SELECT m.marker, mv.value
-         FROM input_marker im
-         JOIN marker_value mv ON im.marker_values_id = mv.id
-         JOIN marker m ON mv.marker_id = m.id
+         FROM Input_marker im
+                JOIN Marker_value mv ON im.marker_values_id = mv.id
+                JOIN Marker m ON mv.marker_id = m.id
          WHERE im.input_id = ?`,
         [input_id]
     );
@@ -576,17 +596,16 @@ export async function save_combination_as_input(
     for (const row of markerRows as any[]) {
       dbMarkers[row.marker] = row.value;
     }
-    // Compare marker sets
+
     if (
         Object.keys(dbMarkers).length === Object.keys(markers).length &&
         Object.entries(markers).every(([k, v]) => dbMarkers[k] === v)
     ) {
-      // Duplicate found
       return input_id;
     }
   }
 
-  // 3. If not found, insert
+  // 3. Insert new input
   const [res] = await pool.execute(
       "INSERT INTO Data_Input (dataset_id) VALUES (?)",
       [dataset_id]
@@ -599,7 +618,9 @@ export async function save_combination_as_input(
   );
   const template_id = (configRows as any)[0].prompt_template_id;
 
+  // 4. For each marker
   for (const [marker, value] of Object.entries(markers)) {
+    // Get or insert Marker
     const [markerRows] = await pool.execute(
         "SELECT id FROM Marker WHERE marker = ? AND template_id = ?",
         [marker, template_id]
@@ -616,12 +637,26 @@ export async function save_combination_as_input(
       marker_id = (markerRows as any)[0].id;
     }
 
-    const [insertValue] = await pool.execute(
-        "INSERT INTO Marker_value (marker_id, value) VALUES (?, ?)",
-        [marker_id, value]
-    );
-    const marker_value_id = (insertValue as any).insertId;
+    // Compute hash
+    const hash = computeMarkerValueHash(marker_id, value);
 
+    // Get or insert Marker_value by hash
+    const [valueRows] = await pool.execute(
+        "SELECT id FROM Marker_value WHERE marker_id = ? AND hash = ?",
+        [marker_id, hash]
+    );
+    let marker_value_id: number;
+    if ((valueRows as any[]).length === 0) {
+      const [insertValue] = await pool.execute(
+          "INSERT INTO Marker_value (marker_id, value) VALUES (?, ?)",
+          [marker_id, value]
+      );
+      marker_value_id = (insertValue as any).insertId;
+    } else {
+      marker_value_id = (valueRows as any)[0].id;
+    }
+
+    // Insert Input_marker link
     await pool.execute(
         "INSERT INTO Input_marker (input_id, marker_values_id) VALUES (?, ?)",
         [input_id, marker_value_id]
@@ -631,9 +666,17 @@ export async function save_combination_as_input(
   return input_id;
 }
 
-export async function update_promptconfig_dataset(config_id: number, new_dataset_id: number) {
+function computeMarkerValueHash(marker_id: number, value: string): string {
+  const result = crypto
+      .createHash("sha256")
+      .update(`${marker_id}${value}`)
+      .digest("hex");
+  return result;
+}
+
+export async function update_promptconfig_final_dataset(config_id: number, new_dataset_id: number) {
   await pool.execute(
-      "UPDATE PromptConfig SET dataset_id = ? WHERE id = ?",
+      "UPDATE PromptConfig SET final_dataset_id = ? WHERE id = ?",
       [new_dataset_id, config_id]
   );
 }
@@ -646,7 +689,7 @@ export async function get_all_input_ids_from_dataset(dataset_id: number): Promis
   return (rows as any[]).map(row => row.id);
 }
 
-export async function save_sub_template(
+async function save_sub_template(
     template_id: number,
     sub_template_id: number,
     var_name: string
@@ -688,4 +731,43 @@ export async function get_config(config_id: number): Promise<Promptconfig> {
   } catch (error) {
     console.error(error);
   }
+}
+
+export async function update_template_vars(template_id: number, vars: Record<string, string> = {}){
+  try{
+    const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
+    for (const [var_name, var_value] of Object.entries(vars)) {
+      const [rows] = await pool.execute(sql_var_id, [var_value]);
+      if ((rows as any[]).length > 0) {
+        const sub_template_id = (rows as any[])[0].id;
+        await save_sub_template(template_id, sub_template_id, var_name);
+      }
+    }
+    return;
+  }
+  catch(error){
+    console.error(error);
+    throw error;
+  }
+}
+
+export async function add_config_base_dataset(config_id: number, dataset_id: number) {
+  try {
+    const sql = 'INSERT INTO config_base_dataset (config_id, dataset_id) VALUES (?, ?)';
+    await pool.execute(sql, [config_id, dataset_id]);
+  } catch (error) {
+    console.error('Error updating promptconfig with base dataset:', error);
+  }
+}
+
+export async function get_base_datasets(config_id: number){
+  try{
+    const sql = 'SELECT dataset_id FROM config_base_dataset WHERE config_id = ?';
+    const [rows] = await pool.execute(sql, [config_id]);
+    return (rows as any[]).map(row => row.dataset_id);
+  }
+    catch (error) {
+        console.error('Error fetching base datasets for config:', error);
+        return [];
+    }
 }
