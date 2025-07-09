@@ -1,7 +1,12 @@
-import {LLMSpec, PromptVarsDict} from "../backend/typing";
-import {Input, Llm_params} from "../backend/api/types";
-import {get_marker_by_id} from "./apiCall";
+import {LLMSpec, PromptVarsDict} from "../typing";
+import {Input, Llm_params} from "./types";
+import {get_marker_by_id} from "../database/database";
 
+/**
+ * Creates a specification for the LLM based on the provided parameters.
+ * @param llm The LLMSpec object containing the LLM details.
+ * @param llm_param The Llm_params object containing the parameters for the LLM.
+ */
 export function create_llm_spec(llm: LLMSpec, llm_param: Llm_params): LLMSpec {
     const settings: any = {
         ...(llm_param.max_tokens !== undefined && { max_tokens: llm_param.max_tokens }),

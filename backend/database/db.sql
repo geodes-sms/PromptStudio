@@ -195,7 +195,10 @@ CREATE TABLE Evaluator_config(
 );
 
 CREATE TABLE Template_dependency_progress(
-    template_id INT UNSIGNED NOT NULL,
-    last_result_id INT UNSIGNED NOT NULL,
-    PRIMARY KEY (template_id, last_result_id)
-)
+    template_id INT UNSIGNED NOT NULL PRIMARY KEY,
+    last_seen_result_id INT UNSIGNED NOT NULL,
+    CONSTRAINT FK_template_id_progress FOREIGN KEY (template_id) REFERENCES PromptTemplate(id),
+    CONSTRAINT FK_last_seen_result_id FOREIGN KEY (last_seen_result_id) REFERENCES Result(id)
+);
+
+

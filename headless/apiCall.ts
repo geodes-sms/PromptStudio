@@ -1,6 +1,5 @@
 import axios from "axios";
 import {
-    Data_input,
     Dataset,
     Evaluator,
     Experiment, Input,
@@ -13,8 +12,11 @@ import {
 import FormData from 'form-data';
 // @ts-ignore
 import fs from 'fs';
+import yaml from "js-yaml";
 import {LLMSpec, PromptVarsDict} from "../backend/typing";
 import {PassThrough} from "node:stream";
+import * as path from "node:path";
+import Dict = NodeJS.Dict;
 
 const URL = "http://localhost:3000";
 
@@ -457,5 +459,138 @@ export async function get_base_datasets_for_config(config_id: number): Promise<n
     } catch (error) {
         console.error('Failed to get base datasets:', error);
         return [];
+    }
+}
+
+export async function get_last_seen_result_id(template_id: string){
+    try{
+        const response = await axios.get(`${URL}/latest_seen_result/${template_id}`);
+        return response.data;
+    }
+    catch (error) {
+        console.error('Failed to get latest seen result:', error);
+        return null;
+    }
+}
+
+export async function update_template_dependency_progress(template_id: number, result_id: number){
+    try{
+        const response = await axios.put(`${URL}/template_dependency_progress/${template_id}/${result_id}`);
+        return response.data;
+    }
+    catch (error) {
+        console.error('Failed to update template dependency progress:', error);
+        return null;
+    }
+}
+
+
+/**
+ * Saves a configuration file to the server.
+ * This function reads a YAML configuration file, extracts datasets and evaluators files, and uploads them along with the configuration file itself.
+ * @param configPath path to the YAML configuration file.
+ */
+export async function save_config(configPath: string): Promise<string | undefined> {
+    try {
+        if (!configPath || !fs.existsSync(configPath)) {
+            throw new Error(`Missing or invalid config file: ${configPath}`);
+        }
+
+        const fileContent = fs.readFileSync(configPath, "utf-8");
+        const parsed = yaml.load(fileContent) as any;
+
+        const formData = new FormData();
+
+        formData.append("yaml", fs.createReadStream(configPath), {
+            filename: path.basename(configPath),
+        });
+
+        const fileFields = new Map<string, string>();
+
+        for (const cfg of parsed.configs || []) {
+            if (cfg.datasets) {
+                for (const ds of cfg.datasets) {
+                    const datasetPath = ds.path;
+                    const key = `file:${datasetPath}`;
+                    if (!fileFields.has(key) && fs.existsSync(datasetPath)) {
+                        fileFields.set(key, datasetPath);
+                    }
+                }
+            }
+
+            if (cfg.evaluators) {
+                for (const ev of cfg.evaluators) {
+                    const evaluatorPath = ev.file;
+                    const key = `evaluator:${evaluatorPath}`;
+                    if (!fileFields.has(key) && fs.existsSync(evaluatorPath)) {
+                        fileFields.set(key, evaluatorPath);
+                    }
+                }
+            }
+        }
+
+        // @ts-ignore
+        for (const [fieldName, filePath] of fileFields.entries()) {
+            formData.append(fieldName, fs.createReadStream(filePath), {
+                filename: path.basename(filePath),
+            });
+        }
+
+        const response = await axios.post(`${URL}/config`, formData, {
+            headers: {
+                ...formData.getHeaders(),
+            },
+        });
+
+        return response.data.experiment_name;
+    } catch (error) {
+        console.error("Failed to save config:", error);
+    }
+}
+
+/**
+ * Runs an experiment by its name using the API.
+ * @param name The name of the experiment to run.
+ * @param api_keys A dictionary of API keys to use for the experiment.
+ */
+export async function run_experiment(name: string, api_keys: Dict<any>): Promise<void> {
+    try {
+        const response = await axios.get(`${URL}/run_experiment/${name}`,
+            {
+                params: {
+                    api_keys: api_keys
+                }
+            });
+        console.log(`Experiment ${name} started successfully.`);
+    } catch (error) {
+        console.error(`Failed to run experiment ${name}:`, error);
+    }
+}
+
+/**
+ * Evaluates an experiment by its name using the API.
+ * @param name The name of the experiment to evaluate.
+ */
+export async function evaluate_experiment(name: string): Promise<void> {
+    try {
+        const response = await axios.get(`${URL}/evaluate_experiment/${name}`);
+        console.log(`Experiment ${name} evaluated successfully.`);
+    } catch (error) {
+        console.error(`Failed to evaluate experiment ${name}:`, error);
+    }
+}
+
+/**
+ * Gets the total token count for a specific experiment.
+ * @param experiment_name The name of the experiment to get the token count for.
+ * @returns The total token count for the experiment.
+ */
+export async function getTotalTokenCountForExperiment(experiment_name: string): Promise<number> {
+    try {
+        const response = await axios.get(`${URL}/total_tokens/${experiment_name}`);
+        return response.data.total_tokens;
+    } catch (error) {
+        console.error(`Failed to get total token count for experiment ${experiment_name}:`, error);
+        return 0;
     }
 }

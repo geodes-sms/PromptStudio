@@ -37,11 +37,14 @@ import {
     get_config,
     update_template_vars,
     add_config_base_dataset,
-    get_base_datasets
+    get_base_datasets, get_last_seen_result_id, update_template_dependency_progress
 } from "../database/database";
 // @ts-ignore
 import multer from 'multer';
 import {Evaluator, Experiment} from "./types";
+import {evaluate_experiment, run_experiment} from "./runner";
+import {getTotalTokenCountForExperiment, save_config} from "./configHandler";
+import {Dict} from "../typing";
 
 const app = express();
 const port = 3000;
@@ -585,6 +588,88 @@ app.get('/config_base_dataset/:config_id', async (req, res) => {
     }
 })
 
+app.get('/latest_seen_result/:template_id', async (req, res) => {
+    try{
+        const template_id = req.params.template_id;
+        const latest_seen_result = await get_last_seen_result_id(template_id);
+        res.json({ latest_seen_result });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.put('/template_dependency_progress/:template_id/:result_id', async (req, res) => {
+    try{
+        const template_id = req.params.template_id;
+        const result_id = req.params.result_id;
+        await update_template_dependency_progress(template_id, result_id);
+        res.json({ message: 'Template dependency progress updated' });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.post('/config', upload.any(), async (req, res) => {
+    try {
+        const yamlFile = req.files.find(f => f.fieldname === 'yaml');
+        if (!yamlFile) return res.status(400).json({ error: "Missing YAML config file" });
+
+        const fileMap: Record<string, Express.Multer.File[]> = {};
+        for (const f of req.files) {
+            if (!fileMap[f.fieldname]) {
+                fileMap[f.fieldname] = [];
+            }
+            fileMap[f.fieldname].push(f);
+        }
+
+        const experiment_name = await save_config(yamlFile.path, fileMap);
+        res.status(201).json({ experiment_name });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/run_experiment/:name', async (req, res) => {
+    try{
+        const experiment_name = req.params.name;
+        const api_keys = req.query.api_keys as Dict<string>;
+        await run_experiment(experiment_name, api_keys);
+        res.status(200).json({ message: `Experiment ${experiment_name} started.` });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/evaluate_experiment/:name', async (req, res) => {
+    try{
+        const experiment_name = req.params.name;
+        await evaluate_experiment(experiment_name);
+        res.status(200).json({ message: `Evaluation for experiment ${experiment_name} started.` });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
+
+app.get('/total_tokens/:experiment_name', async (req, res) => {
+    try{
+        const experiment_name = req.params.experiment_name;
+        const total_tokens = await getTotalTokenCountForExperiment(experiment_name);
+        res.json({ total_tokens });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+})
 
 
 app.listen(port, () => {

@@ -27,14 +27,23 @@ export const pool = mysql.createPool({
   waitForConnections: true,
 });
 
+/**
+ * Saves a dataset to the database.
+ * This function processes a CSV file, extracts markers and their values,
+ * inserts them into the database, and associates them with the dataset and the template.
+ * @param file The path to the CSV file containing the dataset.
+ * @param name The name of the dataset to be saved.
+ * @param template_id The ID of the template associated with the dataset.
+ * @return The ID of the newly created dataset.
+ */
 export async function save_dataset(file: string, name: string, template_id: number): Promise<number> {
   try {
     const sql_dataset = 'INSERT INTO Dataset(name) VALUES (?)';
     const [result] = await pool.execute(sql_dataset, [name]);
     const dataset_id = (result as any).insertId;
 
+    // If no file is provided, return the dataset_id immediately meaning it's a synthetic dataset and will be filled later.
     if (!file || file.trim() === '') {
-      console.log('Created synthetic dataset (no file to process)');
       return dataset_id;
     }
 
@@ -88,7 +97,6 @@ export async function save_dataset(file: string, name: string, template_id: numb
       }
     }
 
-    console.log('CSV file successfully processed');
     return dataset_id;
 
   } catch (error) {
@@ -96,6 +104,14 @@ export async function save_dataset(file: string, name: string, template_id: numb
   }
 }
 
+/**
+ * Saves a prompt template to the database.
+ * This function inserts a template into the PromptTemplate table and associates any sub-templates with it.
+ * @param template The prompt template string to be saved.
+ * @param name The name of the template.
+ * @param vars An optional record of variable names and their corresponding sub-template IDs.
+ * @return The ID of the newly created template.
+ */
 export async function save_template(template: string, name: string, vars: Record<string, string> = {}): Promise<number> {
   try {
     const sql = "INSERT INTO PromptTemplate(value, name) VALUES (?, ?)";
@@ -116,6 +132,12 @@ export async function save_template(template: string, name: string, vars: Record
   }
 }
 
+/**
+ * Saves an experiment to the database.
+ * This function inserts an experiment into the Experiment table.
+ * @param experiment The Experiment object containing details of the experiment.
+ * @returns The ID of the newly created experiment.
+ */
 export async function save_experiment(experiment: Experiment): Promise<number> {
   try {
     const sql = "INSERT INTO Experiment(title, iterations, max_retry, threads) VALUES (?, ?, ?, ?)";
@@ -127,6 +149,11 @@ export async function save_experiment(experiment: Experiment): Promise<number> {
   }
 }
 
+/**
+ * Saves a new LLM specification to the database.
+ * @param llm The LLMSpec object containing details of the LLM.
+ * @returns The ID of the newly created LLM.
+ */
 export async function save_llm(llm: LLMSpec): Promise<number>{
   try{
     const sql = "INSERT INTO LLM(base_model, name, model) VALUES (?, ?, ?)";
@@ -139,6 +166,12 @@ export async function save_llm(llm: LLMSpec): Promise<number>{
     }
 }
 
+/**
+ * Saves LLM parameters to the database.
+ * This function inserts the parameters into the llm_param table and saves any custom parameters in llm_custom_param.
+ * @param llm_params The Llm_params object containing the parameters to be saved.
+ * @returns The ID of the newly created LLM parameters.
+ */
 export async function save_llm_param(llm_params: Partial<Llm_params>): Promise<number>{
   try{
     const fields = [];
@@ -204,6 +237,16 @@ export async function save_llm_param(llm_params: Partial<Llm_params>): Promise<n
     }
 }
 
+/**
+ * Saves a prompt configuration to the database.
+ * This function inserts a new prompt configuration into the promptconfig table.
+ * @param experiment_id The ID of the experiment associated with this configuration.
+ * @param llm_id The ID of the LLM used in this configuration.
+ * @param llm_param_id The ID of the LLM parameters used in this configuration.
+ * @param template_id The ID of the prompt template used in this configuration.
+ * @param dataset_id The ID of the dataset used in this configuration.
+ * @returns The ID of the newly created prompt configuration.
+ */
 export async function save_promptconfig(experiment_id: number, llm_id: number, llm_param_id: number, template_id: number, dataset_id: number): Promise<number>{
   try{
     const sql = 'INSERT INTO promptconfig(experiment_id, llm_id, llm_param_id, prompt_template_id, final_dataset_id) VALUES (?, ?, ?, ?, ?)';
@@ -216,6 +259,11 @@ export async function save_promptconfig(experiment_id: number, llm_id: number, l
     }
 }
 
+/**
+ * Retrieves all prompt configurations associated with a specific experiment.
+ * @param experiment_id The ID of the experiment for which to retrieve prompt configurations.
+ * @returns An array of Promptconfig objects associated with the specified experiment.
+ */
 export async function get_prompt_config_by_experiment(experiment_id: number): Promise<Promptconfig[]> {
   try {
     const sql = 'SELECT * FROM promptconfig WHERE experiment_id = ?';
@@ -228,6 +276,11 @@ export async function get_prompt_config_by_experiment(experiment_id: number): Pr
     }
 }
 
+/**
+ * Retrieves an experiment by its name.
+ * @param experiment_name The name of the experiment to retrieve.
+ * @returns The Experiment object if found, otherwise undefined.
+ */
 export async function get_experiment_by_name(experiment_name: string): Promise<Experiment>{
   try{
     const sql = 'SELECT * FROM experiment WHERE title = ?';
@@ -241,7 +294,13 @@ export async function get_experiment_by_name(experiment_name: string): Promise<E
   }
 }
 
-export async function get_llm_by_id(llm_id: number): Promise<Llm>{
+/**
+ * Retrieves an LLM specification by its ID.
+ * This function fetches the LLM details from the database using the provided LLM ID.
+ * @param llm_id The ID of the LLM to retrieve.
+ * @return The LLMSpec object if found, otherwise undefined.
+ */
+export async function get_llm_by_id(llm_id: number): Promise<LLMSpec>{
   try{
     const sql = 'SELECT * FROM llm WHERE id = ?';
     const [rows] = await pool.execute(sql, [llm_id]);
@@ -254,6 +313,14 @@ export async function get_llm_by_id(llm_id: number): Promise<Llm>{
   }
 }
 
+
+/**
+ * Retrieves LLM parameters by their ID.
+ * This function fetches the LLM parameters from the database using the provided LLM parameter ID.
+ * It also retrieves any custom parameters associated with the LLM parameter.
+ * @param llm_param_id The ID of the LLM parameter to retrieve.
+ * @return The Llm_params object if found, otherwise undefined.
+ */
 export async function get_llm_param_by_id(llm_param_id: number): Promise<Llm_params>{
   try{
     const sql = 'SELECT * FROM llm_param WHERE id = ?';
@@ -280,6 +347,12 @@ export async function get_llm_param_by_id(llm_param_id: number): Promise<Llm_par
   }
 }
 
+/**
+ * Retrieves all LLM specifications from the database.
+ * This function fetches all LLMs and their parameters, returning them as an array of LLMSpec objects.
+ * @param template_id The ID of the template to filter LLMs by, if provided.
+ * @returns An array of LLMSpec objects representing all LLMs in the database.
+ */
 async function get_subtemplate_vars(template_id: number): Promise<Record<string, string>>{
   const sql_sub_template = 'SELECT sub_template_id, var_name FROM sub_template WHERE main_template_id = ?';
   const [subRows] = await pool.execute(sql_sub_template, [template_id]);
@@ -290,6 +363,11 @@ async function get_subtemplate_vars(template_id: number): Promise<Record<string,
   return vars;
 }
 
+/**
+ * Retrieves a prompt template by its name.
+ * @param name The name of the prompt template to retrieve.
+ * @return The prompttemplate object if found, otherwise undefined.
+ */
 export async function get_template_by_name(name: string): Promise<prompttemplate>{
     try{
         const sql = 'SELECT * FROM PromptTemplate WHERE name = ?';
@@ -307,6 +385,11 @@ export async function get_template_by_name(name: string): Promise<prompttemplate
     }
 }
 
+/**
+ * Retrieves a prompt template by its ID.
+ * @param template_id The ID of the prompt template to retrieve.
+ * @return The prompttemplate object if found, otherwise undefined.
+ */
 export async function get_template_by_id(template_id: number): Promise<prompttemplate> {
   try {
     const sql = 'SELECT * FROM PromptTemplate WHERE id = ?';
@@ -322,6 +405,11 @@ export async function get_template_by_id(template_id: number): Promise<prompttem
   }
 }
 
+/**
+ * Retrieves a dataset by its ID.
+ * @param dataset_id The ID of the dataset to retrieve.
+ * @return The Dataset object if found, otherwise undefined.
+ */
 export async function get_dataset_by_id(dataset_id:  number): Promise<Dataset>{
   try{
     const sql = 'SELECT * FROM Dataset WHERE id = ?';
@@ -336,6 +424,11 @@ export async function get_dataset_by_id(dataset_id:  number): Promise<Dataset>{
   }
 }
 
+/**
+ * Retrieves a dataset by its name.
+ * @param name The name of the dataset to retrieve.
+ * @return The Dataset object if found, otherwise undefined.
+ */
 export async function get_dataset_by_name(name: string): Promise<Dataset>{
   try{
     const sql = 'SELECT * FROM Dataset WHERE name = ?';
@@ -350,6 +443,11 @@ export async function get_dataset_by_name(name: string): Promise<Dataset>{
   }
 }
 
+/**
+ * Fetches an input along with its associated markers from the database.
+ * @param input_id The ID of the input to fetch.
+ * @return An Input object containing the input ID and its associated markers.
+ */
 async function fetch_input_with_markers(input_id: number): Promise<Input> {
   const sqlMarkers = 'SELECT marker_values_id FROM input_marker WHERE input_id = ?';
   const [rowsMarkers] = await pool.execute(sqlMarkers, [input_id]);
@@ -374,6 +472,11 @@ async function fetch_input_with_markers(input_id: number): Promise<Input> {
   return { id: input_id, markers };
 }
 
+/**
+ * Retrieves an input by its ID, including its associated markers.
+ * @param input_id The ID of the input to retrieve.
+ * @return An Input object if found, otherwise undefined.
+ */
 export async function get_input_by_id(input_id: number): Promise<Input | undefined> {
   try {
     const sqlCheck = 'SELECT id FROM data_input WHERE id = ?';
@@ -446,7 +549,7 @@ export async function get_last_input_id(dataset_id: number): Promise<number>{
   }
 }
 
-export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number, start_time: Date, end_time: Date): Promise<number>{
+export async function save_error(config_id: number, error_message: string, error_status: number, input_id: number, start_time: string, end_time: string): Promise<number>{
   try{
     const sql = 'INSERT INTO error(config_id, error_message, error_code, input_id, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)';
     const values = [config_id, error_message, error_status, input_id, start_time, end_time];
@@ -460,7 +563,7 @@ export async function save_error(config_id: number, error_message: string, error
 
 export async function get_results(config_id: number, input_id: number): Promise<Result[]>{
   try {
-    const sql = 'SELECT output_result FROM result WHERE config_id = ? AND input_id = ?';
+    const sql = 'SELECT * FROM result WHERE config_id = ? AND input_id = ?';
     const [rows] = await pool.execute(sql, [config_id, input_id]);
     return rows as Result[];
   }
@@ -770,4 +873,46 @@ export async function get_base_datasets(config_id: number){
         console.error('Error fetching base datasets for config:', error);
         return [];
     }
+}
+
+export async function get_last_seen_result_id(template_id: number): Promise<number> {
+  const [rows]: any = await pool.query(
+      "SELECT last_seen_result_id FROM Template_dependency_progress WHERE template_id = ?",
+      [template_id]
+  );
+  return rows.length > 0 ? rows[0].last_seen_result_id : 0;
+}
+
+export async function update_template_dependency_progress(template_id: number, result_id: number): Promise<void> {
+  await pool.query(
+      `INSERT INTO Template_dependency_progress(template_id, last_seen_result_id)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE last_seen_result_id = GREATEST(last_seen_result_id, VALUES(last_seen_result_id))`,
+      [template_id, result_id]
+  );
+}
+
+export async function save_eval_result(eval_result: string, result_id: number, evaluator_id: number){
+  try{
+    const sql = 'INSERT INTO evaluationsresult(evaluation_result, result_id, evaluator_id) VALUES (?, ?, ?)';
+    const values = [eval_result, result_id, evaluator_id];
+    const [result] = await pool.execute(sql, values);
+    return (result as any).insertId;
+  }
+    catch (error) {
+        console.error('Error saving evaluation result:', error);
+    }
+}
+
+export async function get_evaluation_result(result_id: number, evaluator_id: number): Promise<string | undefined> {
+  try {
+    const sql = 'SELECT evaluation_result FROM evaluationsresult WHERE result_id = ? AND evaluator_id = ?';
+    const [rows] = await pool.execute(sql, [result_id, evaluator_id]);
+    if ((rows as any[]).length > 0) {
+      return (rows as any[])[0].evaluation_result;
+    }
+    return undefined;
+  } catch (error) {
+    console.error('Error fetching evaluation result:', error);
+  }
 }
