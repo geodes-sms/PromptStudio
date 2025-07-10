@@ -4,7 +4,7 @@ import {
     get_evaluation_result,
     get_evaluators_by_config,
     get_results,
-    save_error, save_eval_result,
+    save_error, save_error_evaluator, save_eval_result,
     save_response
 } from "../database/database";
 import {Dict, LLMSpec, PromptVarsDict} from "../typing";
@@ -72,12 +72,12 @@ async function evaluate(config_id: number, input_id: number, LLMSpec: LLMSpec, m
         }
         const eval_results = await executejs(evaluator.code, results_to_evaluate, markersDict, {}, LLMSpec.base_model, template_value, "evaluator");
         if (eval_results.error) {
-            await save_error(config_id, eval_results.error, 0, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '), new Date().toISOString().replace('T', ' ').replace('Z', ' '));
+            await save_error_evaluator(evaluator.id, eval_results.error, config_id, null, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
             continue;
         }
         for (const eval_result of eval_results.responses) {
             if (eval_result.error) {
-                await save_error(config_id, eval_result.error, 0, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '), new Date().toISOString().replace('T', ' ').replace('Z', ' '));
+                await save_error_evaluator(evaluator.id, eval_result.error, config_id, eval_result.result_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
             } else {
                 const result = eval_result.result;
                 if (result) {

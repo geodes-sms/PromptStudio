@@ -98,7 +98,7 @@ CREATE TABLE Marker_value(
 CREATE TABLE Evaluator(
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     type ENUM('simple', 'javascript', 'python') NOT NULL,
-    code TEXT,
+    code MEDIUMTEXT,
     name VARCHAR(255) NOT NULL UNIQUE,
     CONSTRAINT PK_Evaluator PRIMARY KEY (id)
 );
@@ -170,7 +170,7 @@ CREATE TABLE Error(
     input_id INT UNSIGNED NOT NULL,
     error_message TEXT NOT NULL,
     error_code INT UNSIGNED NOT NULL,
-    start_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    start_time TIMESTAMP(6) NOT NULL,
     end_time TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT PK_Error PRIMARY KEY (id),
     CONSTRAINT FK_config_id_error FOREIGN KEY (config_id) REFERENCES PromptConfig(id),
@@ -199,6 +199,19 @@ CREATE TABLE Template_dependency_progress(
     last_seen_result_id INT UNSIGNED NOT NULL,
     CONSTRAINT FK_template_id_progress FOREIGN KEY (template_id) REFERENCES PromptTemplate(id),
     CONSTRAINT FK_last_seen_result_id FOREIGN KEY (last_seen_result_id) REFERENCES Result(id)
+);
+
+CREATE TABLE Error_evaluator(
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    evaluator_id INT UNSIGNED NOT NULL,
+    error_message TEXT NOT NULL,
+    config_id INT UNSIGNED NOT NULL,
+    result_id INT UNSIGNED,
+    timestamp TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT PK_Error_evaluator PRIMARY KEY (id),
+    CONSTRAINT FK_evaluator_id_error_eval FOREIGN KEY (evaluator_id) REFERENCES Evaluator(id),
+    CONSTRAINT FK_config_id_error_eval FOREIGN KEY (config_id) REFERENCES PromptConfig(id),
+    CONSTRAINT FK_result_id_error_eval FOREIGN KEY (result_id) REFERENCES Result(id)
 );
 
 

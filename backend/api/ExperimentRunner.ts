@@ -33,22 +33,30 @@ export class ExperimentRunner {
     private failedQueue: Map<number, Task[]> = new Map();
     private isProducing = true;
     private errors = 0;
+    private pool: workerpool.WorkerPool;
 
     /**
      * Constructor for the ExperimentRunner class.
      * @param experiment_name The name of the experiment to run.
      * @param num_workers The number of worker threads to use for processing.
-     * @param pool The worker pool to manage the worker threads.
      * @param configs An array of Promptconfig objects representing the configurations for the experiment.
      * @param api_keys A dictionary of API keys required for the experiment.
      */
     constructor(
         private experiment_name: string,
         private num_workers: number,
-        private pool: workerpool.WorkerPool,
         private configs: Promptconfig[],
         private api_keys: Dict<string>
-    ) {}
+    ) {
+        this.pool = workerpool.pool(__dirname + '/worker.js', {
+            minWorkers: this.num_workers,
+            maxWorkers: this.num_workers,
+            workerType: 'thread',
+            workerThreadOpts: {
+                execArgv: ['--require', 'tsx']
+            }
+        });
+    }
 
     /**
      * Runs the experiment by producing tasks and executing them with worker threads.
@@ -206,7 +214,7 @@ export class ExperimentRunner {
     }
 
     private async submitEvaluation(task: Task){
-        await this.pool.exec("executejs",[
+        await this.pool.exec("evaluate",[
             task.config_id,
             task.input_id,
             task.llm_spec,

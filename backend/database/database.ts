@@ -916,3 +916,15 @@ export async function get_evaluation_result(result_id: number, evaluator_id: num
     console.error('Error fetching evaluation result:', error);
   }
 }
+
+export async function save_error_evaluator(evaluator_id: number, error_message: string, config_id: number, result_id: number, timestamp: string){
+  try{
+    const sql = 'INSERT INTO error_evaluator(evaluator_id, error_message, config_id, result_id, timestamp) VALUES (?, ?, ?, ?, ?)';
+    const values = [evaluator_id, error_message, config_id, result_id, timestamp];
+    const [result] = await pool.execute(sql, values);
+    return (result as any).insertId;
+  }
+    catch (error) {
+        console.error('Error saving error evaluator:', error);
+    }
+}

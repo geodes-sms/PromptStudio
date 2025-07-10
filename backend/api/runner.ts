@@ -24,15 +24,7 @@ async function run_configs(experiment: Experiment, configs: Promptconfig[], api_
     // const bar = new ProgressBar("Processing LLM calls: [:bar] :percent :etas", { total });
 
     const num_workers = experiment.threads || 1;
-    const pool = workerpool.pool(path.resolve(__dirname, 'worker.ts'), {
-        minWorkers: num_workers,
-        maxWorkers: num_workers,
-        workerType: "thread",
-        workerThreadOpts: {
-            execArgv: ['--require', 'tsx']
-        },
-    });
-    const runner = new ExperimentRunner(experiment.title, num_workers, pool, configs, api_keys);
+    const runner = new ExperimentRunner(experiment.title, num_workers, configs, api_keys);
     if (eval_only) {
         await runner.evaluate();
         return;
