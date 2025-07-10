@@ -49,7 +49,7 @@ export class ExperimentRunner {
         private configs: Promptconfig[],
         private api_keys: Dict<string>
     ) {
-        this.pool = workerpool.pool(__dirname + '/worker.js', {
+        this.pool = workerpool.pool(__dirname + '/worker.ts', {
             minWorkers: this.num_workers,
             maxWorkers: this.num_workers,
             workerType: 'thread',

@@ -142,7 +142,7 @@ export async function save_template(template: string, name: string, iterations:n
  */
 export async function save_experiment(experiment: Experiment): Promise<number> {
   try {
-    const sql = "INSERT INTO Experiment(title, max_retry, threads) VALUES (?, ?, ?, ?)";
+    const sql = "INSERT INTO Experiment(title, max_retry, threads) VALUES (?, ?, ?)";
     const values = [experiment.title, experiment.max_retry, experiment.threads];
     const [result] = await pool.execute(sql, values);
     return result.insertId;
@@ -598,8 +598,8 @@ export async function get_dataset_size(dataset_id: number): Promise<number>{
 
 export async function save_evaluator(evaluator: Evaluator): Promise<number>{
   try{
-    const sql = 'INSERT INTO Evaluator(type, code, name) VALUES (?, ?, ?)';
-    const [result] = await pool.execute(sql, [evaluator.type, evaluator.code, evaluator.name]);
+    const sql = 'INSERT INTO Evaluator(type, code, name, return_type) VALUES (?, ?, ?, ?)';
+    const [result] = await pool.execute(sql, [evaluator.type, evaluator.code, evaluator.name, evaluator.return_type]);
     return (result as any).insertId;
   }
   catch (error) {

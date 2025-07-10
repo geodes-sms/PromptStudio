@@ -144,7 +144,7 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
                     const evaluatorCode = fs.readFileSync(evaluatorPath, "utf-8");
 
                     const existing = await get_evaluator_by_name(evaluator.name);
-                    const evaluator_id = existing ? existing.id : await save_evaluator({ ...evaluator, code: evaluatorCode });
+                    const evaluator_id = existing ? existing.id : await save_evaluator({ ...evaluator, code: evaluatorCode});
                     evaluator_ids.push(evaluator_id);
                 }
             }

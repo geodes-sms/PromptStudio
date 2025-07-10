@@ -100,6 +100,7 @@ CREATE TABLE Evaluator(
     type ENUM('simple', 'javascript', 'python') NOT NULL,
     code MEDIUMTEXT,
     name VARCHAR(255) NOT NULL UNIQUE,
+    return_type ENUM('string', 'number', 'boolean') NOT NULL DEFAULT 'string',
     CONSTRAINT PK_Evaluator PRIMARY KEY (id)
 );
 

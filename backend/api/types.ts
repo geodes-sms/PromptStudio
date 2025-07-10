@@ -27,7 +27,14 @@ export type Evaluator = {
   file?: string;
   code?: string;
   name: string;
+  return_type: Return_type;
 };
+
+enum Return_type{
+  string = "string",
+  number = "number",
+  boolean = "boolean",
+}
 
 export type MarkerValue = {
   id: number;
