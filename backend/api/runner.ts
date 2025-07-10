@@ -7,8 +7,6 @@ import {
 import {Experiment, Promptconfig} from "./types";
 import {get_number_of_total_inputs, prepare_config} from "./configHandler";
 import {ExperimentRunner} from "./ExperimentRunner";
-import * as path from "node:path";
-import workerpool from "workerpool";
 import {Dict} from "../typing";
 
 

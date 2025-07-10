@@ -1,7 +1,6 @@
 export type Experiment = {
   id: number;
   title: string;
-  iterations: number;
   max_retry?: number;
   threads?: number;
 };
@@ -45,6 +44,7 @@ export type prompttemplate = {
   id : number;
   value: string;
   name: string;
+  iterations: number;
   vars?: Record<string, string>;
 }
 
@@ -79,10 +79,4 @@ export type Result = {
   input_id: number;
   start_time: Date;
   end_time: Date;
-}
-
-export type Data_input = {
-  id: number;
-  dataset_id: number;
-  oracle?: string;
 }

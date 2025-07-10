@@ -1,4 +1,5 @@
 import {Dict, LLMSpec, PromptVarsDict} from "../typing";
+// @ts-ignore
 import workerpool from "workerpool";
 import {
     get_config,
@@ -102,7 +103,7 @@ export class ExperimentRunner {
                 input_id = input.id;
                 const markersDict = await get_marker_map(input);
 
-                let iterations = experiment.iterations;
+                let iterations = template.iterations;
                 const existing = await get_results(config.id, input_id);
                 if (existing?.length) iterations -= existing.length;
                 // Ensure we still have iterations to run for a given input

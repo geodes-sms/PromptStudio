@@ -7,13 +7,11 @@ USE promptstudio;
 CREATE TABLE Experiment(
     id int UNSIGNED NOT NULL AUTO_INCREMENT,
     title VARCHAR(255) NOT NULL UNIQUE,
-    iterations int NOT NULL DEFAULT 1,
     datetime TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     total_requests INT UNSIGNED NOT NULL DEFAULT 0,
     max_retry INT UNSIGNED NOT NULL DEFAULT 0,
     threads INT UNSIGNED NOT NULL DEFAULT 1,
     CONSTRAINT PK_Experiment PRIMARY KEY (id),
-    CHECK ( iterations > 0 ),
     CHECK ( max_retry >= 0 )
 );
 
@@ -60,7 +58,9 @@ CREATE TABLE PromptTemplate(
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     value TEXT NOT NULL,
     name varchar(255) UNIQUE NOT NULL,
-    CONSTRAINT PK_Prompt_Template PRIMARY KEY (id)
+    iterations int NOT NULL DEFAULT 1,
+    CONSTRAINT PK_Prompt_Template PRIMARY KEY (id),
+    CHECK ( iterations > 0 )
 );
 
 -- We should check that we don't have a 2 way relation

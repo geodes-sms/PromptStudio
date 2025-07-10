@@ -17,6 +17,7 @@ import {LLMSpec, PromptVarsDict} from "../typing";
 import fs from "fs";
 import {parse} from "csv-parse";
 
+// @ts-ignore
 import crypto from "crypto";
 
 export const pool = mysql.createPool({
@@ -109,13 +110,14 @@ export async function save_dataset(file: string, name: string, template_id: numb
  * This function inserts a template into the PromptTemplate table and associates any sub-templates with it.
  * @param template The prompt template string to be saved.
  * @param name The name of the template.
+ * @param iterations The number of iterations for the template.
  * @param vars An optional record of variable names and their corresponding sub-template IDs.
  * @return The ID of the newly created template.
  */
-export async function save_template(template: string, name: string, vars: Record<string, string> = {}): Promise<number> {
+export async function save_template(template: string, name: string, iterations:number, vars: Record<string, string> = {}): Promise<number> {
   try {
-    const sql = "INSERT INTO PromptTemplate(value, name) VALUES (?, ?)";
-    const values = [template, name];
+    const sql = "INSERT INTO PromptTemplate(value, name, iterations) VALUES (?, ?, ?)";
+    const values = [template, name, iterations];
     const [result] = await pool.execute(sql, values);
     const template_id = (result as any).insertId;
     const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
@@ -140,8 +142,8 @@ export async function save_template(template: string, name: string, vars: Record
  */
 export async function save_experiment(experiment: Experiment): Promise<number> {
   try {
-    const sql = "INSERT INTO Experiment(title, iterations, max_retry, threads) VALUES (?, ?, ?, ?)";
-    const values = [experiment.title, experiment.iterations, experiment.max_retry, experiment.threads];
+    const sql = "INSERT INTO Experiment(title, max_retry, threads) VALUES (?, ?, ?, ?)";
+    const values = [experiment.title, experiment.max_retry, experiment.threads];
     const [result] = await pool.execute(sql, values);
     return result.insertId;
   } catch (error) {

@@ -1,3 +1,4 @@
+// @ts-ignore
 import fs from "fs";
 import {
     add_config_base_dataset,
@@ -118,6 +119,7 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
         for (const config of parsed.configs) {
             const templateName = config.template.name;
             const templateValue = config.template.value;
+            const iterations = config.iterations || 1;
 
             let uniqueName = templateName;
             let templateCounter = 1;
@@ -125,7 +127,7 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
                 uniqueName = `${templateName}_${templateCounter++}`;
             }
 
-            const template_id = await save_template(templateValue, uniqueName, {});
+            const template_id = await save_template(templateValue, uniqueName, iterations, {});
             templateIdByName.set(templateName, template_id);
         }
 
@@ -361,7 +363,7 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
                 input_id = input.id;
                 const results = await get_results(config.id, input_id);
 
-                let remainingIterations = experiment.iterations;
+                let remainingIterations = template.iterations;
 
                 if (results && results.length > 0) {
                     remainingIterations -= results.length;

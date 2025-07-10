@@ -1,3 +1,4 @@
+// @ts-ignore
 import workerpool from 'workerpool';
 import {queryLLM} from "../backend";
 import {
@@ -27,6 +28,7 @@ async function processExperiment(config_id: number, llm_spec: LLMSpec, iteration
                                  template_value: string, markersDict: PromptVarsDict,
                                  input_id: number, api_keys: Dict<string>, tries: number = 0 ): Promise<{success: boolean, tries: number}> {
     const start_time = new Date().toISOString().replace('T', ' ').replace('Z', ' ');
+    // @ts-ignore
     const safe_api_keys = JSON.parse(api_keys);
     const responses = await queryLLM(
         config_id.toString(),
