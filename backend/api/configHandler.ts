@@ -29,12 +29,14 @@ import {
     update_template_dependency_progress,
     update_template_vars
 } from "../database/database";
+import {pool} from "../database/database";
 import yaml from "js-yaml";
 import {Evaluator, Experiment, Llm_params, Promptconfig} from "./types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {get_marker_map} from "./utils";
 import {PromptPermutationGenerator} from "../template";
 import {getTokenCount} from "./token";
+import {PoolConnection} from "mysql2/promise";
 
 
 /**
@@ -82,38 +84,44 @@ function hasCycle(graph: Map<string, string[]>): boolean {
  * @param yml_path The path to the YAML configuration file.
  * @param file_map A map of file fields for datasets and evaluators to their corresponding uploaded files.
  */
-export async function save_config(yml_path: string, file_map: Record<string, Express.Multer.File[]>): Promise<string | undefined> {
+export async function save_config(
+    yml_path: string,
+    file_map: Record<string, Express.Multer.File[]>
+): Promise<string | undefined> {
+    const connection: PoolConnection = await pool.getConnection();
     try {
+        await connection.beginTransaction();
+
         const raw = fs.readFileSync(yml_path, "utf-8");
         const parsed: any = yaml.load(raw);
 
         let experimentName = parsed.experiment.title;
         let counter = 1;
-        let existingExperiment = await get_experiment_by_name(experimentName);
+        let existingExperiment = await get_experiment_by_name(experimentName, connection);
 
         while (existingExperiment) {
             experimentName = `${parsed.experiment.title}_${counter++}`;
-            existingExperiment = await get_experiment_by_name(experimentName);
+            existingExperiment = await get_experiment_by_name(experimentName, connection);
         }
 
-        // Cycle detection step
+        // Detect cyclic template dependencies
         const templateDeps = new Map<string, string[]>();
         for (const config of parsed.configs) {
             const templateName = config.template.name;
-            if (config.template.vars && typeof config.template.vars === "object") {
-                const deps: string[] = Object.values(config.template.vars);
-                templateDeps.set(templateName, deps);
-            } else {
-                templateDeps.set(templateName, []);
-            }
+            const deps: string[] = config.template.vars ? Object.values(config.template.vars) : [];
+            templateDeps.set(templateName, deps);
         }
         if (hasCycle(templateDeps)) {
             throw new Error("Invalid configuration: cyclic dependency between templates detected.");
         }
 
         // Save experiment
-        const experiment_id = await save_experiment({ ...parsed.experiment, title: experimentName });
+        const experiment_id = await save_experiment(
+            { ...parsed.experiment, title: experimentName },
+            connection
+        );
         const templateIdByName = new Map<string, number>();
+        const uniqueNameByOriginalName = new Map<string, string>();
 
         // Pass 1: Save templates
         for (const config of parsed.configs) {
@@ -123,19 +131,28 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
 
             let uniqueName = templateName;
             let templateCounter = 1;
-            while (await get_template_by_name(uniqueName)) {
+            while (await get_template_by_name(uniqueName, connection)) {
                 uniqueName = `${templateName}_${templateCounter++}`;
             }
 
-            const template_id = await save_template(templateValue, uniqueName, iterations, {});
+            const template_id = await save_template(templateValue, uniqueName, iterations, {}, connection);
             templateIdByName.set(templateName, template_id);
+            uniqueNameByOriginalName.set(templateName, uniqueName);
         }
 
         // Pass 2: Save configs
         for (const config of parsed.configs) {
             const template_id = templateIdByName.get(config.template.name)!;
-            await update_template_vars(template_id, config.template.vars);
 
+            // Rewrite vars using unique template names
+            const rawVars: Record<string, string> = config.template.vars || {};
+            const resolvedVars: Record<string, string> = {};
+            for (const [varName, referencedName] of Object.entries(rawVars)) {
+                resolvedVars[varName] = uniqueNameByOriginalName.get(referencedName) as string || referencedName;
+            }
+            await update_template_vars(template_id, resolvedVars, connection);
+
+            // Save evaluators
             const evaluator_ids: number[] = [];
             if (config.evaluators) {
                 for (const evaluator of config.evaluators as Evaluator[]) {
@@ -143,15 +160,18 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
                     const evaluatorPath = file_map[fileField]?.[0]?.path ?? evaluator.file;
                     const evaluatorCode = fs.readFileSync(evaluatorPath, "utf-8");
 
-                    const existing = await get_evaluator_by_name(evaluator.name);
-                    const evaluator_id = existing ? existing.id : await save_evaluator({ ...evaluator, code: evaluatorCode});
+                    const existing = await get_evaluator_by_name(evaluator.name, connection);
+                    const evaluator_id = existing
+                        ? existing.id
+                        : await save_evaluator({ ...evaluator, code: evaluatorCode }, connection);
                     evaluator_ids.push(evaluator_id);
                 }
             }
 
+            // Save LLMs
             for (const llm of config.llms as LLMSpec[]) {
-                const existing = await get_llm_by_base_model(llm.base_model);
-                const llm_id = existing ? existing.id : await save_llm(llm);
+                const existing = await get_llm_by_base_model(llm.base_model, connection);
+                const llm_id = existing ? existing.id : await save_llm(llm, connection);
 
                 const llm_params: Partial<Llm_params> = {};
                 const custom_params: Record<string, string> = {};
@@ -165,32 +185,46 @@ export async function save_config(yml_path: string, file_map: Record<string, Exp
                 }
                 if (Object.keys(custom_params).length > 0) llm_params.custom_params = custom_params;
 
-                const llm_param_id = await save_llm_param(llm_params);
-                const config_id = await save_promptconfig(experiment_id, llm_id, llm_param_id, template_id, null);
+                const llm_param_id = await save_llm_param(llm_params, connection);
+                const config_id = await save_promptconfig(
+                    experiment_id,
+                    llm_id,
+                    llm_param_id,
+                    template_id,
+                    null,
+                    connection
+                );
 
+                // Save datasets
                 if (config.datasets) {
                     for (const dataset of config.datasets) {
                         const fileField = `file:${dataset.path}`;
                         const datasetPath = file_map[fileField]?.[0]?.path ?? dataset.path;
 
-                        const existing = await get_dataset_by_name(dataset.name);
+                        const existing = await get_dataset_by_name(dataset.name, connection);
                         const dataset_id = existing
                             ? existing.id
-                            : await save_dataset(datasetPath, dataset.name, template_id);
+                            : await save_dataset(datasetPath, dataset.name, template_id, connection);
 
-                        await add_config_base_dataset(config_id, dataset_id);
+                        await add_config_base_dataset(config_id, dataset_id, connection);
                     }
                 }
 
+                // Link evaluators to config
                 for (const evaluator_id of evaluator_ids) {
-                    await save_evaluator_config(evaluator_id, config_id);
+                    await save_evaluator_config(evaluator_id, config_id, connection);
                 }
             }
         }
 
+        await connection.commit();
         return experimentName;
+
     } catch (error) {
+        await connection.rollback();
         console.error("Error saving configuration:", error);
+    } finally {
+        connection.release();
     }
 }
 

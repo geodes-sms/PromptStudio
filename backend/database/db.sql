@@ -216,3 +216,27 @@ CREATE TABLE Error_evaluator(
 );
 
 
+CREATE VIEW View_Result_By_Template AS
+SELECT
+    r.*,
+    pc.prompt_template_id
+FROM result r
+    JOIN promptconfig pc ON r.config_id = pc.id
+    JOIN PromptTemplate pt ON pc.prompt_template_id = pt.id;
+
+CREATE VIEW View_Evaluator_By_Config AS
+SELECT
+    e.*,
+    ec.config_id
+FROM Evaluator e
+    JOIN Evaluator_config ec ON e.id = ec.evaluator_id;
+
+
+CREATE VIEW View_Input_Marker_Values AS
+SELECT
+    im.input_id,
+    m.marker,
+    mv.value
+FROM Input_marker im
+    JOIN Marker_value mv ON im.marker_values_id = mv.id
+    JOIN Marker m ON mv.marker_id = m.id;
