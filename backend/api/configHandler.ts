@@ -1,368 +1,161 @@
 // @ts-ignore
 import fs from "fs";
 import {
-    add_config_base_dataset,
-    get_all_input_ids_from_dataset,
-    get_base_datasets,
-    get_config,
-    get_dataset_by_id,
-    get_dataset_by_name,
-    get_dataset_size,
-    get_evaluator_by_name,
+    get_data_inputs_by_dataset,
     get_experiment_by_name,
-    get_input_by_id, get_last_input_id,
-    get_last_seen_result_id,
-    get_llm_by_base_model, get_llm_by_id, get_llm_param_by_id, get_next_input,
-    get_prompt_config_by_experiment, get_results,
-    get_results_by_template, get_template_by_id,
-    get_template_by_name,
-    save_combination_as_input,
+    get_last_input_id,
+    get_llm_by_base_model,
+    get_llm_by_id,
+    get_next_input,
+    get_node_by_name, get_parents, get_processor_results_by_id,
+    get_prompt_config_by_experiment,
+    get_results,
+    get_results_by_template, get_target_var,
+    get_template_by_id,
+    pool,
     save_dataset,
-    save_evaluator,
-    save_evaluator_config,
-    save_experiment,
+    save_evaluator, save_experiment,
+    save_link,
     save_llm,
     save_llm_param,
+    save_node,
+    save_processor,
     save_promptconfig,
     save_template,
-    update_promptconfig_final_dataset,
-    update_template_dependency_progress,
-    update_template_vars
 } from "../database/database";
-import {pool} from "../database/database";
+// @ts-ignore
 import yaml from "js-yaml";
-import {Evaluator, Experiment, Llm_params, Promptconfig} from "./types";
+import {Dataset, Evaluator, Experiment_node, Llm_params, ProcessorResult, Promptconfig} from "./types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {get_marker_map} from "./utils";
 import {PromptPermutationGenerator} from "../template";
 import {getTokenCount} from "./token";
 import {PoolConnection} from "mysql2/promise";
 
+async function handle_save_template(template: any, connection: PoolConnection, experiment_id: number){
+    const node_id = await save_node('prompt_template', experiment_id, template.name, connection);
+    await save_template(template.value, template.name, template.iterations || 1, {}, node_id, connection);
+    for (const llm of template.llms as LLMSpec[]) {
+        const existing = await get_llm_by_base_model(llm.base_model, connection);
+        const llm_id = existing ? existing.id : await save_llm(llm, connection);
 
-/**
- * Checks if the given graph has a cycle.
- * This function checks if there are any cyclic dependencies in the template graph.
- * @param graph A map representing the graph where keys are node names and values are arrays of neighboring nodes.
- */
-function hasCycle(graph: Map<string, string[]>): boolean {
-    const visited = new Set<string>();
-    const recStack = new Set<string>();
+        const llm_params: Partial<Llm_params> = {};
+        const custom_params: Record<string, string> = {};
+        const known = ["max_tokens", "top_p", "top_k", "stop_sequence", "frequency_penalty", "presence_penalty"];
+        const native = ["name", "model", "temp", "base_model", "settings", "emoji", "key"];
 
-    function dfs(node: string): boolean {
-        if (!visited.has(node)) {
-            visited.add(node);
-            recStack.add(node);
-
-            for (const neighbor of graph.get(node) || []) {
-                if (!graph.has(neighbor)) {
-                    throw new Error(`Template dependency error: '${node}' depends on unknown template '${neighbor}'`);
-                }
-
-                if (!visited.has(neighbor) && dfs(neighbor)) {
-                    return true;
-                } else if (recStack.has(neighbor)) {
-                    return true;
-                }
-            }
+        if (llm.temp !== undefined) llm_params.temperature = llm.temp;
+        for (const [k, v] of Object.entries(llm)) {
+            if (known.includes(k)) llm_params[k] = v;
+            else if (!native.includes(k) && v !== undefined) custom_params[k] = String(v);
         }
-        recStack.delete(node);
-        return false;
-    }
+        if (Object.keys(custom_params).length > 0) llm_params.custom_params = custom_params;
 
-    // @ts-ignore
-    for (const node of graph.keys()) {
-        if (dfs(node)) {
-            return true;
-        }
+        const llm_param_id = await save_llm_param(llm_params, connection);
+        const config_id = await save_promptconfig(
+            experiment_id,
+            llm_id,
+            llm_param_id,
+            node_id,
+            null,
+            connection
+        );
     }
-
-    return false;
 }
 
-/**
- * Saves the configuration from a YAML file and processes it to create an experiment.
- * @param yml_path The path to the YAML configuration file.
- * @param file_map A map of file fields for datasets and evaluators to their corresponding uploaded files.
- */
-export async function save_config(
-    yml_path: string,
-    file_map: Record<string, Express.Multer.File[]>
-): Promise<string | undefined> {
-    const connection: PoolConnection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
+async function handle_save_dataset(dataset: Dataset, connection:PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
+    const node_id = await save_node('dataset', experiment_id, dataset.name, connection);
+    const fileField = `file:${dataset.path}`;
+    const datasetPath = file_map[fileField]?.[0]?.path ?? dataset.path;
+    await save_dataset(datasetPath, node_id, dataset.name, connection);
+}
 
+async function handle_save_evaluator(evaluator: Evaluator, connection: PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
+    const node_id = await save_node('evaluator', experiment_id, evaluator.name, connection);
+    const fileField = `evaluator:${evaluator.file}`;
+    const evaluatorPath = file_map[fileField]?.[0]?.path ?? evaluator.file;
+    const evaluatorCode = fs.readFileSync(evaluatorPath, "utf-8");
+    await save_evaluator({ ...evaluator, code: evaluatorCode, node_id: node_id }, connection);
+}
+
+async function handle_save_processor(processor: any, connection: PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
+    const node_id = await save_node('processor', experiment_id, processor.name, connection);
+    const fileField = `processor:${processor.file}`;
+    const processorPath = file_map[fileField]?.[0]?.path ?? processor.file;
+    const processorCode = fs.readFileSync(processorPath, "utf-8");
+    await save_processor({ ...processor, code: processorCode, node_id: node_id }, connection);
+}
+
+export async function save_config(
+    yml_path: string, file_map: Record<string, Express.Multer.File[]>
+){
+    const connection: PoolConnection = await pool.getConnection();
+    try{
+        await connection.beginTransaction();
         const raw = fs.readFileSync(yml_path, "utf-8");
         const parsed: any = yaml.load(raw);
-
         let experimentName = parsed.experiment.title;
         let counter = 1;
         let existingExperiment = await get_experiment_by_name(experimentName, connection);
-
         while (existingExperiment) {
             experimentName = `${parsed.experiment.title}_${counter++}`;
             existingExperiment = await get_experiment_by_name(experimentName, connection);
         }
-
-        // Detect cyclic template dependencies
-        const templateDeps = new Map<string, string[]>();
-        for (const config of parsed.configs) {
-            const templateName = config.template.name;
-            const deps: string[] = config.template.vars ? Object.values(config.template.vars) : [];
-            templateDeps.set(templateName, deps);
-        }
-        if (hasCycle(templateDeps)) {
-            throw new Error("Invalid configuration: cyclic dependency between templates detected.");
-        }
-
         // Save experiment
-        const experiment_id = await save_experiment(
-            { ...parsed.experiment, title: experimentName },
-            connection
-        );
-        const templateIdByName = new Map<string, number>();
-        const uniqueNameByOriginalName = new Map<string, string>();
-
-        // Pass 1: Save templates
-        for (const config of parsed.configs) {
-            const templateName = config.template.name;
-            const templateValue = config.template.value;
-            const iterations = config.iterations || 1;
-
-            let uniqueName = templateName;
-            let templateCounter = 1;
-            while (await get_template_by_name(uniqueName, connection)) {
-                uniqueName = `${templateName}_${templateCounter++}`;
+        const experiment_id = await save_experiment({ ...parsed.experiment, title: experimentName }, connection);
+        const promises: Promise<any>[] = [];
+        for (const node of parsed.nodes){
+            if (node.template){
+                await handle_save_template(node.template, connection, experiment_id);
             }
-
-            const template_id = await save_template(templateValue, uniqueName, iterations, {}, connection);
-            templateIdByName.set(templateName, template_id);
-            uniqueNameByOriginalName.set(templateName, uniqueName);
-        }
-
-        // Pass 2: Save configs
-        for (const config of parsed.configs) {
-            const template_id = templateIdByName.get(config.template.name)!;
-
-            // Rewrite vars using unique template names
-            const rawVars: Record<string, string> = config.template.vars || {};
-            const resolvedVars: Record<string, string> = {};
-            for (const [varName, referencedName] of Object.entries(rawVars)) {
-                resolvedVars[varName] = uniqueNameByOriginalName.get(referencedName) as string || referencedName;
+            else if(node.dataset){
+                promises.push(handle_save_dataset(node.dataset, connection, file_map, experiment_id));
             }
-            await update_template_vars(template_id, resolvedVars, connection);
-
-            // Save evaluators
-            const evaluator_ids: number[] = [];
-            if (config.evaluators) {
-                for (const evaluator of config.evaluators as Evaluator[]) {
-                    const fileField = `evaluator:${evaluator.file}`;
-                    const evaluatorPath = file_map[fileField]?.[0]?.path ?? evaluator.file;
-                    const evaluatorCode = fs.readFileSync(evaluatorPath, "utf-8");
-
-                    const existing = await get_evaluator_by_name(evaluator.name, connection);
-                    const evaluator_id = existing
-                        ? existing.id
-                        : await save_evaluator({ ...evaluator, code: evaluatorCode }, connection);
-                    evaluator_ids.push(evaluator_id);
-                }
+            else if(node.evaluator){
+                promises.push(handle_save_evaluator(node.evaluator, connection, file_map, experiment_id));
             }
-
-            // Save LLMs
-            for (const llm of config.llms as LLMSpec[]) {
-                const existing = await get_llm_by_base_model(llm.base_model, connection);
-                const llm_id = existing ? existing.id : await save_llm(llm, connection);
-
-                const llm_params: Partial<Llm_params> = {};
-                const custom_params: Record<string, string> = {};
-                const known = ["max_tokens", "top_p", "top_k", "stop_sequence", "frequency_penalty", "presence_penalty"];
-                const native = ["name", "model", "temp", "base_model", "settings", "emoji", "key"];
-
-                if (llm.temp !== undefined) llm_params.temperature = llm.temp;
-                for (const [k, v] of Object.entries(llm)) {
-                    if (known.includes(k)) llm_params[k] = v;
-                    else if (!native.includes(k) && v !== undefined) custom_params[k] = String(v);
-                }
-                if (Object.keys(custom_params).length > 0) llm_params.custom_params = custom_params;
-
-                const llm_param_id = await save_llm_param(llm_params, connection);
-                const config_id = await save_promptconfig(
-                    experiment_id,
-                    llm_id,
-                    llm_param_id,
-                    template_id,
-                    null,
-                    connection
-                );
-
-                // Save datasets
-                if (config.datasets) {
-                    for (const dataset of config.datasets) {
-                        const fileField = `file:${dataset.path}`;
-                        const datasetPath = file_map[fileField]?.[0]?.path ?? dataset.path;
-
-                        const existing = await get_dataset_by_name(dataset.name, connection);
-                        const dataset_id = existing
-                            ? existing.id
-                            : await save_dataset(datasetPath, dataset.name, template_id, connection);
-
-                        await add_config_base_dataset(config_id, dataset_id, connection);
-                    }
-                }
-
-                // Link evaluators to config
-                for (const evaluator_id of evaluator_ids) {
-                    await save_evaluator_config(evaluator_id, config_id, connection);
-                }
+            else if(node.processor){
+                promises.push(handle_save_processor(node.processor, connection, file_map, experiment_id));
+            }
+            else{
+                throw new Error(`Unknown node type in configuration: ${JSON.stringify(node)}`);
             }
         }
-
+        await Promise.all(promises);
+        const promisesLinks: Promise<any>[] = [];
+        for (const link of parsed.links){
+            const sourceNode: Experiment_node = await get_node_by_name(link.source, experiment_id, connection);
+            const targetNode: Experiment_node = await get_node_by_name(link.target, experiment_id, connection);
+            if (!sourceNode || !targetNode) {
+                throw new Error(`Link error: source or target node not found for link ${JSON.stringify(link)}`);
+            }
+            promisesLinks.push(save_link(sourceNode.id, targetNode.id,  link.source_var || null, link.target_var || null, connection));
+        }
+        await Promise.all(promisesLinks);
         await connection.commit();
         return experimentName;
-
-    } catch (error) {
+    }
+    catch (error) {
+        console.error("Error saving configuration nodes:", error);
         await connection.rollback();
-        console.error("Error saving configuration:", error);
     } finally {
         connection.release();
     }
 }
 
-/**
- * Prepares the configuration for an experiment by creating a synthetic dataset based on the provided prompt configuration and dependencies.
- * @param experiment The experiment object containing details about the experiment.
- * @param config The prompt configuration to prepare.
- * @param deps A record of dependencies where keys are variable names and values are template IDs.
- */
-export async function prepare_config(experiment: Experiment, config: Promptconfig, deps: Record<string, string>) {
-    const base_datasets = await get_base_datasets(config.id);
+export function cartesianProduct(arrays: Record<string, string>[][]): Record<string, string>[] {
+    if (arrays.length === 0) return [];
 
-    const datasets = [];
-    for (const ds of base_datasets) {
-        const dataset = await get_dataset_by_id(ds);
-        if (dataset) datasets.push(dataset);
-    }
+    return arrays.reduce((acc, curr) => {
+        const result: Record<string, string>[] = [];
 
-    const datasetIds = base_datasets.map(d => d).sort((a, b) => a - b).join('_');
-    const synthetic_dataset_name = `synth_${experiment.title}_template${config.prompt_template_id}_datasets${datasetIds}`;
-    let synthetic_dataset = await get_dataset_by_name(synthetic_dataset_name);
-    let synthetic_dataset_id: number;
-
-    if (synthetic_dataset) {
-        synthetic_dataset_id = synthetic_dataset.id;
-    } else {
-        synthetic_dataset_id = await save_dataset('', synthetic_dataset_name, config.prompt_template_id);
-    }
-
-    await update_promptconfig_final_dataset(config.id, synthetic_dataset_id);
-
-    const datasetInputs: PromptVarsDict[][] = [];
-    for (const ds of datasets) {
-        const inputIds = await get_all_input_ids_from_dataset(ds.id);
-        const markersForDataset: PromptVarsDict[] = [];
-
-        for (const input_id of inputIds) {
-            const input = await get_input_by_id(input_id);
-            const markers = await get_marker_map(input);
-            markersForDataset.push(markers);
-        }
-        datasetInputs.push(markersForDataset);
-    }
-
-    const productOfInputs = cartesianProduct(datasetInputs);
-
-    const latestProgress: Record<number, number> = {};
-    const allResultsByTemplate: Record<number, string[]> = {};
-    const newResultsByVar: Record<string, string[]> = {};
-
-    for (const [varName, template_id] of Object.entries(deps)) {
-        const lastSeen = await get_last_seen_result_id(Number(template_id));
-        const allResults = await get_results_by_template(template_id);
-        const newResults = allResults.filter(r => r.id > lastSeen);
-
-        allResultsByTemplate[template_id] = allResults.map(r => r.output_result);
-
-        if (newResults.length > 0) {
-            latestProgress[template_id] = Math.max(...newResults.map(r => r.id));
-            newResultsByVar[varName] = newResults.map(r => r.output_result);
-        }
-    }
-
-    for (const [varName, newValues] of Object.entries(newResultsByVar)) {
-        const otherVars = Object.keys(deps).filter(k => k !== varName);
-
-        let combos: PromptVarsDict[] = [];
-
-        for (const newVal of newValues) {
-            let partialCombos: PromptVarsDict[] = [{}];
-
-            for (const otherVar of otherVars) {
-                const otherTemplateId = Number(deps[otherVar]);
-                const results = allResultsByTemplate[otherTemplateId] || [];
-
-                const nextCombos: PromptVarsDict[] = [];
-                for (const partial of partialCombos) {
-                    for (const val of results) {
-                        nextCombos.push({ ...partial, [otherVar]: val });
-                    }
-                }
-
-                partialCombos = nextCombos;
-            }
-
-            for (const partial of partialCombos) {
-                combos.push({ ...partial, [varName]: newVal });
+        for (const a of acc) {
+            for (const b of curr) {
+                result.push({ ...a, ...b });
             }
         }
-
-        for (const combo of combos) {
-            for (const baseMarkers of productOfInputs) {
-                const mergedBase = Object.assign({}, ...baseMarkers);
-                const fullMarkers = { ...combo, ...mergedBase };
-                await save_combination_as_input(synthetic_dataset_id, config.id, fullMarkers);
-            }
-        }
-    }
-
-    if (Object.keys(deps).length === 0) {
-        for (const baseMarkers of productOfInputs) {
-            const merged = Object.assign({}, ...baseMarkers);
-            await save_combination_as_input(synthetic_dataset_id, config.id, merged);
-        }
-    }
-
-    for (const [template_id, maxResultId] of Object.entries(latestProgress)) {
-        await update_template_dependency_progress(Number(template_id), maxResultId);
-    }
-}
-
-/**
- * Calculates the Cartesian product of multiple arrays.
- * This function takes an array of arrays and returns an array containing all possible combinations of elements from the input arrays.
- * @param arrays An array of arrays, where each inner array contains elements to combine.
- */
-function cartesianProduct<T>(arrays: T[][]): T[][] {
-    return arrays.reduce<T[][]>(
-        (acc, curr) =>
-            acc.flatMap(a => curr.map(b => [...a, b])),
-        [[]]
-    );
-}
-
-/**
- * Calculates the total number of inputs across all prompt configurations.
- * This function iterates through each prompt configuration, retrieves the final dataset ID, and sums the sizes of all datasets.
- * @param prompt_configs An array of Promptconfig objects representing the prompt configurations.
- */
-export async function get_number_of_total_inputs(prompt_configs: Promptconfig[]) {
-    let total_inputs = 0;
-    for (const config of prompt_configs) {
-        const updated_config = await get_config(config.id);
-        if (updated_config.final_dataset_id) {
-            total_inputs += await get_dataset_size(updated_config.final_dataset_id);
-        }
-    }
-    return total_inputs;
+        return result;
+    }, [{}] as Record<string, string>[]);
 }
 
 /**
@@ -381,17 +174,15 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
             if (!config.final_dataset_id) {
                 continue;
             }
-            const dataset = await get_dataset_by_id(config.final_dataset_id);
             const llm = await get_llm_by_id(config.LLM_id);
-            const llm_param = await get_llm_param_by_id(config.LLM_param_id);
             const template = await get_template_by_id(config.prompt_template_id);
             const model = llm.base_model;
 
             let input_id = 0;
-            const last_id = await get_last_input_id(dataset.id);
+            const last_id = await get_last_input_id(config.final_dataset_id);
 
             while (input_id !== last_id) {
-                const input = await get_next_input(dataset.id, input_id);
+                const input = await get_next_input(config.final_dataset_id, input_id);
                 if (!input) break;
 
                 input_id = input.id;
@@ -420,4 +211,59 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
         console.error("Error computing total token count:", error);
         return 0;
     }
+}
+
+export async function resolve_inputs(node_id: number): Promise<PromptVarsDict[]> {
+    const dataset_parents: number[] = await get_parents(node_id, 'dataset');
+    const template_parents: number[] = await get_parents(node_id, 'prompt_template');
+    const processor_parents: number[] = await get_parents(node_id, 'processor');
+
+    // If no parents leaf dataset pull input rows directly
+    if (dataset_parents.length + template_parents.length + processor_parents.length === 0) {
+        return await get_data_inputs_by_dataset(node_id);
+    }
+
+    // Otherwise recursively resolve each parent
+    const resolved_per_parent: PromptVarsDict[][] = [];
+
+    for (const parent_id of dataset_parents) {
+        const parent_inputs = await resolve_inputs(parent_id);
+        const new_inputs: PromptVarsDict[] = [];
+        for (const input of parent_inputs){
+            const dict: PromptVarsDict = {};
+            for (const marker of Object.keys(input)) {
+                const value = input[marker];
+                const target_var = await get_target_var(parent_id, node_id, marker);
+                dict[target_var] = value;
+            }
+            new_inputs.push(dict);
+        }
+        resolved_per_parent.push(new_inputs);
+    }
+
+    for (const parent_id of template_parents){
+        const results = await get_results_by_template(parent_id.toString());
+        const new_inputs: PromptVarsDict[] = [];
+        const target_var = await get_target_var(parent_id, node_id, 'prompt');
+        for (const result of results) {
+            const dict: PromptVarsDict = {};
+            dict[target_var] = result.output_result;
+            new_inputs.push(dict);
+        }
+        resolved_per_parent.push(new_inputs);
+    }
+
+    for (const parent_id of processor_parents) {
+        const results: ProcessorResult[] = await get_processor_results_by_id(parent_id);
+        const new_inputs: PromptVarsDict[] = [];
+        const target_var = await get_target_var(parent_id, node_id, 'output');
+        for (const result of results) {
+            const dict: PromptVarsDict = {};
+            dict[target_var] = result.processor_result;
+            new_inputs.push(dict);
+        }
+        resolved_per_parent.push(new_inputs);
+    }
+    // Combine (Cartesian product by default)
+    return cartesianProduct(resolved_per_parent);
 }

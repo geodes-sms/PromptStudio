@@ -1,5 +1,6 @@
 import { Command } from "commander";
-import {evaluate_experiment, getTotalTokenCountForExperiment, run_experiment, save_config} from "./apiCall";
+import {getTotalTokenCountForExperiment, run_experiment, save_config} from "./apiCall";
+// @ts-ignore
 import fs from "fs";
 import * as path from "node:path";
 
@@ -32,9 +33,8 @@ async function main() {
         .name("headless")
         .option("-c, --config <string>", "Path to the YAML configuration file")
         .option("-n, --name <string>", "Name of the experiment to run")
-        .option("-e, --evaluate <string>", "Name of the experiment to evaluate")
         .action((options) => {
-            if ((options.name && (options.config || options.evaluate)) || (options.evaluate && (options.config || options.name))) {
+            if (options.name && options.config) {
                 console.error("Please chose only 1 option.");
                 process.exit(1);
             }
@@ -43,17 +43,18 @@ async function main() {
 
     const options = program.opts();
 
-    const keysPath = path.join(process.cwd(), "api_keys.json");
-    if (!fs.existsSync(keysPath)) {
-        console.error(`Required file 'api_keys.json' not found in ${keysPath}`);
+    const credentialsPath = path.join(process.cwd(), "../credentials.json");
+    if (!fs.existsSync(credentialsPath)) {
+        console.error(`Required file 'credentials.json' not found in ${credentialsPath}`);
         process.exit(1);
     }
 
     let api_keys: Record<string, string> = {};
     try {
-        api_keys = JSON.parse(fs.readFileSync(keysPath, "utf-8"));
+        const parsed = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
+        api_keys = parsed.api_keys;
     } catch (err) {
-        console.error("Failed to parse 'api_keys.json':", err);
+        console.error("Failed to parse 'credentials.json':", err);
         process.exit(1);
     }
 
@@ -66,7 +67,6 @@ async function main() {
             process.exit(0);
         }
         await run_experiment(name, api_keys);
-        await evaluate_experiment(name);
     } else if (options.name) {
         const validate = await validateRun(options.name);
         if (!validate) {
@@ -74,9 +74,6 @@ async function main() {
             process.exit(0);
         }
         await run_experiment(options.name, api_keys);
-        await evaluate_experiment(options.name);
-    }else if (options.evaluate) {
-        await evaluate_experiment(options.evaluate);
     }
     else {
         console.error("Please provide a configuration file or an experiment name.");

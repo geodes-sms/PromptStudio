@@ -3,7 +3,6 @@ import {Dict, LLMSpec, PromptVarsDict} from "../typing";
 import workerpool from "workerpool";
 import {
     get_config,
-    get_dataset_by_id,
     get_experiment_by_name,
     get_last_input_id,
     get_llm_by_id,
@@ -71,14 +70,6 @@ export class ExperimentRunner {
         await this.pool.terminate();
     }
 
-    async evaluate(){
-        await Promise.all([
-            this.produceTasks(),
-            ...Array.from({ length: this.num_workers }, () => this.taskEvaluator())
-        ]);
-        await this.pool.terminate();
-    }
-
     /**
      * Produces tasks for the experiment based on the provided configurations.
      */
@@ -90,30 +81,28 @@ export class ExperimentRunner {
             const llm = await get_llm_by_id(updatedConfig.LLM_id);
             const llm_param = await get_llm_param_by_id(updatedConfig.LLM_param_id);
             const template = await get_template_by_id(updatedConfig.prompt_template_id);
-            const dataset = await get_dataset_by_id(updatedConfig.final_dataset_id);
             const llm_spec = create_llm_spec(llm, llm_param);
 
             let input_id = 0;
-            const last_id = await get_last_input_id(dataset.id);
+            const last_id = await get_last_input_id(updatedConfig.final_dataset_id);
 
             while (input_id !== last_id) {
-                const input = await get_next_input(dataset.id, input_id);
+                const input = await get_next_input(updatedConfig.final_dataset_id, input_id);
                 if (!input) break;
 
                 input_id = input.id;
                 const markersDict = await get_marker_map(input);
 
                 let iterations = template.iterations;
-                const existing = await get_results(config.id, input_id);
+                const existing = await get_results(updatedConfig.id, input_id);
                 if (existing?.length) iterations -= existing.length;
                 // Ensure we still have iterations to run for a given input
                 if (iterations <= 0) {
-                    // this.bar.tick();
                     continue;
                 }
 
                 this.taskQueue.push({
-                    config_id: config.id,
+                    config_id: updatedConfig.id,
                     llm_spec,
                     iterations,
                     template_value: template.value,

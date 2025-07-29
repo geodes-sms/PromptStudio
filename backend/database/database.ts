@@ -2,14 +2,20 @@
 import mysql from "mysql2/promise";
 import {
   Dataset,
+  db_credentials,
   Evaluator,
   Experiment,
+  Experiment_node,
+  ExperimentProcessor,
   Input,
+  Link,
   Llm,
   Llm_params,
   MarkerValue,
+  ProcessorResult,
   Promptconfig,
-  prompttemplate, Result
+  prompttemplate,
+  Result
 } from "../api/types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 
@@ -19,13 +25,25 @@ import {parse} from "csv-parse";
 
 // @ts-ignore
 import crypto from "crypto";
+// @ts-ignore
+import path from "node:path";
+
+const credentialsPath = path.join(process.cwd(), "../../credentials.json");
+const parsed = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+const db_credentials: db_credentials = parsed.database;
 
 export const pool = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "promptstudio",
+  host: db_credentials.host,
+  user: db_credentials.user,
+  password: db_credentials.password,
+  database: db_credentials.database,
+  port: db_credentials.port || 3306,
   waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  maxIdle: 10,
+  idleTimeout: 60000,
 });
 
 /**
@@ -33,27 +51,30 @@ export const pool = mysql.createPool({
  * This function processes a CSV file, extracts markers and their values,
  * inserts them into the database, and associates them with the dataset and the template.
  * @param file The path to the CSV file containing the dataset.
+ * @param node_id
  * @param name The name of the dataset to be saved.
- * @param template_id The ID of the template associated with the dataset.
  * @param connection
  * @return The ID of the newly created dataset.
  */
-export async function save_dataset(file: string, name: string, template_id: number, connection: mysql.Connection | mysql.Pool = pool): Promise<number> {
+export async function save_dataset(
+    file: string,
+    node_id: number,
+    name: string,
+    connection: mysql.Connection | mysql.Pool = pool
+): Promise<number> {
   try {
-    const sql_dataset = 'INSERT INTO Dataset(name) VALUES (?)';
-    const [result] = await connection.execute(sql_dataset, [name]);
-    const dataset_id = (result as any).insertId;
+    const sql_dataset = 'INSERT INTO Dataset(node_id, name) VALUES (?, ?)';
+    await connection.execute(sql_dataset, [node_id, name]);
+    const dataset_id = node_id;
 
-    // If no file is provided, return the dataset_id immediately meaning it's a synthetic dataset and will be filled later.
-    if (!file || file.trim() === '') {
-      return dataset_id;
-    }
+    // If no file is provided, return the dataset_id immediately.
+    if (!file || file.trim() === '') return dataset_id;
 
-    const sql_input = 'INSERT INTO data_input(dataset_id) VALUES (?)';
-    const sql_input_marker = 'INSERT INTO input_marker(input_id, marker_values_id) VALUES (?, ?)';
-    const sql_marker = 'INSERT INTO marker(marker, template_id) VALUES (?, ?)';
-    const sql_marker_value = 'INSERT INTO marker_value(marker_id, value) VALUES (?, ?)';
-    const sql_oracle = 'UPDATE data_input SET oracle = ? WHERE id = ?';
+    const sql_input = 'INSERT INTO Data_Input(dataset_id) VALUES (?)';
+    const sql_input_marker = 'INSERT INTO Input_marker(input_id, marker_values_id) VALUES (?, ?)';
+    const sql_marker = 'INSERT INTO Marker(marker, dataset_id) VALUES (?, ?)';
+    const sql_marker_value = 'INSERT INTO Marker_value(marker_id, value) VALUES (?, ?)';
+    const sql_oracle = 'UPDATE Data_Input SET oracle = ? WHERE id = ?';
 
     const markers_id: Record<string, number> = {};
     const parser = fs.createReadStream(file).pipe(parse({ columns: true, trim: true }));
@@ -68,31 +89,39 @@ export async function save_dataset(file: string, name: string, template_id: numb
           continue;
         }
 
-        // Get or insert marker
         if (!(marker in markers_id)) {
-          const [resMarker] = await connection.execute(sql_marker, [marker, template_id]);
-          markers_id[marker] = (resMarker as any).insertId;
+          // Insert or fetch marker — deduplication handled by unique constraint + SELECT fallback
+          try {
+            const [resMarker] = await connection.execute(sql_marker, [marker, dataset_id]);
+            markers_id[marker] = (resMarker as any).insertId;
+          } catch {
+            const [rows] = await connection.execute(
+                'SELECT id FROM Marker WHERE marker = ? AND dataset_id = ?',
+                [marker, dataset_id]
+            );
+            if ((rows as any[]).length > 0) {
+              markers_id[marker] = (rows as any)[0].id;
+            } else {
+              throw new Error(`Unable to find or create marker '${marker}' for dataset ${dataset_id}`);
+            }
+          }
         }
 
         const marker_id = markers_id[marker];
         const value = row[marker];
         const hash = computeMarkerValueHash(marker_id, value);
 
-        // Get or insert marker_value by hash
-        const [valueRows] = await connection.execute(
-            "SELECT id FROM marker_value WHERE marker_id = ? AND hash = ?",
+        const [existing] = await connection.execute(
+            'SELECT id FROM Marker_value WHERE marker_id = ? AND hash = ?',
             [marker_id, hash]
         );
 
         let marker_value_id: number;
-        if ((valueRows as any[]).length === 0) {
-          const [resMarkerVal] = await connection.execute(
-              sql_marker_value,
-              [marker_id, value]
-          );
-          marker_value_id = (resMarkerVal as any).insertId;
+        if ((existing as any[]).length === 0) {
+          const [resVal] = await connection.execute(sql_marker_value, [marker_id, value]);
+          marker_value_id = (resVal as any).insertId;
         } else {
-          marker_value_id = (valueRows as any)[0].id;
+          marker_value_id = (existing as any)[0].id;
         }
 
         await connection.execute(sql_input_marker, [input_id, marker_value_id]);
@@ -100,9 +129,9 @@ export async function save_dataset(file: string, name: string, template_id: numb
     }
 
     return dataset_id;
-
   } catch (error) {
     console.error('Error in save_dataset:', error);
+    throw error;
   }
 }
 
@@ -113,23 +142,15 @@ export async function save_dataset(file: string, name: string, template_id: numb
  * @param name The name of the template.
  * @param iterations The number of iterations for the template.
  * @param vars An optional record of variable names and their corresponding sub-template IDs.
+ * @param node_id The ID of the node associated with this template.
  * @param connection
  * @return The ID of the newly created template.
  */
-export async function save_template(template: string, name: string, iterations:number, vars: Record<string, string> = {}, connection: mysql.Connection | mysql.Pool = pool): Promise<number> {
+export async function save_template(template: string, name: string, iterations:number, vars: Record<string, string> = {}, node_id: number, connection: mysql.Connection | mysql.Pool = pool): Promise<number> {
   try {
-    const sql = "INSERT INTO PromptTemplate(value, name, iterations) VALUES (?, ?, ?)";
-    const values = [template, name, iterations];
+    const sql = "INSERT INTO PromptTemplate(node_id, value, name, iterations) VALUES (?, ?, ?, ?)";
+    const values = [node_id, template, name, iterations];
     const [result] = await connection.execute(sql, values);
-    const template_id = (result as any).insertId;
-    const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
-    for (const [var_name, var_value] of Object.entries(vars)) {
-        const [rows] = await connection.execute(sql_var_id, [var_value]);
-        if ((rows as any[]).length > 0) {
-            const sub_template_id = (rows as any[])[0].id;
-            await save_sub_template(template_id, sub_template_id, var_name, connection);
-        }
-    }
     return (result as any).insertId;
   } catch (error) {
     console.error(error);
@@ -162,6 +183,12 @@ export async function save_experiment(experiment: Experiment, connection: mysql.
  */
 export async function save_llm(llm: LLMSpec, connection: mysql.Connection | mysql.Pool = pool): Promise<number>{
   try{
+    // Check if the LLM already exists
+    const existingLlm = await get_llm_by_base_model(llm.base_model, connection);
+    if (existingLlm) {
+      // If it exists, return its ID
+      return existingLlm.id;
+    }
     const sql = "INSERT INTO LLM(base_model, name, model) VALUES (?, ?, ?)";
     const values = [llm.base_model, llm.name, llm.model];
     const [result] = await connection.execute(sql, values);
@@ -357,100 +384,19 @@ export async function get_llm_param_by_id(llm_param_id: number): Promise<Llm_par
 }
 
 /**
- * Retrieves all LLM specifications from the database.
- * This function fetches all LLMs and their parameters, returning them as an array of LLMSpec objects.
- * @param template_id The ID of the template to filter LLMs by, if provided.
- * @param connection
- * @returns An array of LLMSpec objects representing all LLMs in the database.
- */
-async function get_subtemplate_vars(template_id: number, connection: mysql.Connection | mysql.Pool = pool): Promise<Record<string, string>>{
-  const sql_sub_template = 'SELECT sub_template_id, var_name FROM sub_template WHERE main_template_id = ?';
-  const [subRows] = await connection.execute(sql_sub_template, [template_id]);
-  const vars = {};
-  for (const row of subRows as any[]) {
-    vars[row.var_name] = row.sub_template_id;
-  }
-  return vars;
-}
-
-/**
- * Retrieves a prompt template by its name.
- * @param name The name of the prompt template to retrieve.
- * @param connection
- * @return The prompttemplate object if found, otherwise undefined.
- */
-export async function get_template_by_name(name: string, connection: mysql.Connection | mysql.Pool = pool): Promise<prompttemplate>{
-    try{
-        const sql = 'SELECT * FROM PromptTemplate WHERE name = ?';
-        const [rows] = await connection.execute(sql, [name]);
-        // Check if there is subtemplate and add them in the vars record
-        if ((rows as any[]).length > 0) {
-          const template = (rows as prompttemplate[])[0];
-          template.vars = await get_subtemplate_vars(template.id, connection);
-          return template;
-        }
-        return undefined;
-    }
-    catch (error) {
-      console.error(error);
-    }
-}
-
-/**
  * Retrieves a prompt template by its ID.
  * @param template_id The ID of the prompt template to retrieve.
  * @return The prompttemplate object if found, otherwise undefined.
  */
 export async function get_template_by_id(template_id: number): Promise<prompttemplate> {
   try {
-    const sql = 'SELECT * FROM PromptTemplate WHERE id = ?';
+    const sql = 'SELECT * FROM PromptTemplate WHERE node_id = ?';
     const [rows] = await pool.execute(sql, [template_id]);
     // Check if there is subtemplate and add them in the vars record
     if ((rows as any[]).length > 0) {
-      const template = (rows as prompttemplate[])[0];
-      template.vars = await get_subtemplate_vars(template.id);
-      return template;
+      return (rows as prompttemplate[])[0];
     }
   } catch (error) {
-    console.error(error);
-  }
-}
-
-/**
- * Retrieves a dataset by its ID.
- * @param dataset_id The ID of the dataset to retrieve.
- * @return The Dataset object if found, otherwise undefined.
- */
-export async function get_dataset_by_id(dataset_id:  number): Promise<Dataset>{
-  try{
-    const sql = 'SELECT * FROM Dataset WHERE id = ?';
-    const [rows] = await pool.execute(sql, [dataset_id]);
-    if ((rows as any[]).length > 0) {
-      return (rows as any[])[0];
-    }
-    return undefined;
-  }
-  catch (error) {
-    console.error(error);
-  }
-}
-
-/**
- * Retrieves a dataset by its name.
- * @param name The name of the dataset to retrieve.
- * @param connection
- * @return The Dataset object if found, otherwise undefined.
- */
-export async function get_dataset_by_name(name: string, connection: mysql.Connection | mysql.Pool = pool): Promise<Dataset>{
-  try{
-    const sql = 'SELECT * FROM Dataset WHERE name = ?';
-    const [rows] = await connection.execute(sql, [name]);
-    if ((rows as any[]).length > 0) {
-      return (rows as any[])[0];
-    }
-    return undefined;
-  }
-  catch (error) {
     console.error(error);
   }
 }
@@ -595,21 +541,10 @@ export async function get_llm_by_base_model(base_model: string, connection: mysq
   }
 }
 
-export async function get_dataset_size(dataset_id: number): Promise<number>{
-    try {
-        const sql = 'SELECT COUNT(*) as size FROM data_input WHERE dataset_id = ?';
-        const [rows] = await pool.execute(sql, [dataset_id]);
-        return (rows as any[])[0].size;
-    } catch (error) {
-        console.error(error);
-        return 0;
-    }
-}
-
 export async function save_evaluator(evaluator: Evaluator, connection: mysql.Connection | mysql.Pool = pool): Promise<number>{
   try{
-    const sql = 'INSERT INTO Evaluator(type, code, name, return_type) VALUES (?, ?, ?, ?)';
-    const [result] = await connection.execute(sql, [evaluator.type, evaluator.code, evaluator.name, evaluator.return_type]);
+    const sql = 'INSERT INTO Evaluator(node_id, type, code, name, return_type) VALUES (?, ?, ?, ?, ?)';
+    const [result] = await connection.execute(sql, [evaluator.node_id, evaluator.type, evaluator.code, evaluator.name, evaluator.return_type]);
     return (result as any).insertId;
   }
   catch (error) {
@@ -617,196 +552,25 @@ export async function save_evaluator(evaluator: Evaluator, connection: mysql.Con
   }
 }
 
-export async function save_evaluator_config(evaluator_id: number, config_id: number, connection: mysql.Connection | mysql.Pool = pool) {
-  try {
-    const sql = 'INSERT INTO Evaluator_config(evaluator_id, config_id) VALUES (?, ?)';
-    const [result] = await connection.execute(sql, [evaluator_id, config_id]);
-    return (result as any).insertId;
-  } catch (error) {
-    console.error(error);
-  }
-}
-
-export async function get_evaluator_by_name(name: string, connection: mysql.Connection | mysql.Pool = pool): Promise<Evaluator>{
+export async function save_processor(processor: Evaluator, connection: mysql.Connection | mysql.Pool = pool): Promise<number>{
   try{
-    const sql = 'SELECT * FROM Evaluator WHERE name = ?';
-    const [rows] = await connection.execute(sql, [name]);
-    if ((rows as any[]).length > 0) {
-      return (rows as Evaluator[])[0];
-    }
-    return undefined;
+    const sql = 'INSERT INTO processor(node_id, type, code, name) VALUES (?, ?, ?, ?)';
+    const [result] = await connection.execute(sql, [processor.node_id, processor.type, processor.code, processor.name]);
+    return (result as any).insertId;
   }
-  catch (error) {
-    console.error(error);
-  }
-}
-
-export async function get_results_by_config(config_id: number): Promise<Result[]> {
-  try {
-    const sql = 'SELECT * FROM result WHERE config_id = ?';
-    const [rows] = await pool.execute(sql, [config_id]);
-    return rows as Result[];
-  } catch (error) {
-    console.error(error);
-    return [];
-  }
-}
-
-export async function get_evaluators_by_config(config_id: number): Promise<Evaluator[]>{
-    try {
-        const sql = 'SELECT * FROM View_Evaluator_By_Config WHERE config_id = ?';
-        const [rows] = await pool.execute(sql, [config_id]);
-        return rows as Evaluator[];
-    } catch (error) {
-        console.error(error);
-        return [];
+    catch (error) {
+        throw error;
     }
-}
-
-export async function get_or_create_synthetic_dataset(
-    base_name: string,
-    dependency_templates: string[]
-): Promise<number> {
-  const synthetic_name = `${base_name}__${dependency_templates.join("__")}`;
-  const [rows] = await pool.execute(
-      "SELECT id FROM Dataset WHERE name = ?",
-      [synthetic_name]
-  );
-  if ((rows as any[]).length > 0) {
-    return (rows as any)[0].id;
-  }
-
-  const [result] = await pool.execute(
-      "INSERT INTO Dataset (name) VALUES (?)",
-      [synthetic_name]
-  );
-  return (result as any).insertId;
-}
-
-/**
- * Saves a synthetic input row along with its associated marker values.
- */
-export async function save_combination_as_input(
-    dataset_id: number,
-    config_id: number,
-    markers: PromptVarsDict
-): Promise<number> {
-  // 1. Get all input IDs for this dataset
-  const [inputRows] = await pool.execute(
-      "SELECT id FROM Data_Input WHERE dataset_id = ?",
-      [dataset_id]
-  );
-  const inputIds = (inputRows as any[]).map(row => row.id);
-
-  // 2. For each input, check if marker values match
-  for (const input_id of inputIds) {
-    const [markerRows] = await pool.execute(
-        `SELECT marker, value
-         FROM View_Input_Marker_Values
-         WHERE input_id = ?`,
-        [input_id]
-    );
-
-    const dbMarkers: Record<string, string> = {};
-    for (const row of markerRows as any[]) {
-      dbMarkers[row.marker] = row.value;
-    }
-
-    if (
-        Object.keys(dbMarkers).length === Object.keys(markers).length &&
-        Object.entries(markers).every(([k, v]) => dbMarkers[k] === v)
-    ) {
-      return input_id;
-    }
-  }
-
-  // 3. Insert new input
-  const [res] = await pool.execute(
-      "INSERT INTO Data_Input (dataset_id) VALUES (?)",
-      [dataset_id]
-  );
-  const input_id = (res as any).insertId;
-
-  // 4. Get template_id
-  const [configRows] = await pool.execute(
-      "SELECT prompt_template_id FROM PromptConfig WHERE id = ?",
-      [config_id]
-  );
-  const template_id = (configRows as any)[0].prompt_template_id;
-
-  // 5. For each marker
-  for (const [marker, value] of Object.entries(markers)) {
-    // Get or insert Marker
-    const [markerRows] = await pool.execute(
-        "SELECT id FROM Marker WHERE marker = ? AND template_id = ?",
-        [marker, template_id]
-    );
-
-    let marker_id: number;
-    if ((markerRows as any[]).length === 0) {
-      const [insertMarker] = await pool.execute(
-          "INSERT INTO Marker (marker, template_id) VALUES (?, ?)",
-          [marker, template_id]
-      );
-      marker_id = (insertMarker as any).insertId;
-    } else {
-      marker_id = (markerRows as any)[0].id;
-    }
-
-    // Compute hash
-    const hash = computeMarkerValueHash(marker_id, value);
-
-    // Get or insert Marker_value by hash
-    const [valueRows] = await pool.execute(
-        "SELECT id FROM Marker_value WHERE marker_id = ? AND hash = ?",
-        [marker_id, hash]
-    );
-
-    let marker_value_id: number;
-    if ((valueRows as any[]).length === 0) {
-      const [insertValue] = await pool.execute(
-          "INSERT INTO Marker_value (marker_id, value) VALUES (?, ?)",
-          [marker_id, value]
-      );
-      marker_value_id = (insertValue as any).insertId;
-    } else {
-      marker_value_id = (valueRows as any)[0].id;
-    }
-
-    // Insert Input_marker link
-    await pool.execute(
-        "INSERT INTO Input_marker (input_id, marker_values_id) VALUES (?, ?)",
-        [input_id, marker_value_id]
-    );
-  }
-
-  return input_id;
 }
 
 function computeMarkerValueHash(marker_id: number, value: string): string {
-  const result = crypto
+  return crypto
       .createHash("sha256")
       .update(`${marker_id}${value}`)
       .digest("hex");
-  return result;
 }
 
-export async function update_promptconfig_final_dataset(config_id: number, new_dataset_id: number) {
-  await pool.execute(
-      "UPDATE PromptConfig SET final_dataset_id = ? WHERE id = ?",
-      [new_dataset_id, config_id]
-  );
-}
-
-export async function get_all_input_ids_from_dataset(dataset_id: number): Promise<number[]> {
-  const [rows] = await pool.execute(
-      "SELECT id FROM Data_Input WHERE dataset_id = ? ORDER BY id ASC",
-      [dataset_id]
-  );
-  return (rows as any[]).map(row => row.id);
-}
-
-async function save_sub_template(
+export async function save_sub_template(
     template_id: number,
     sub_template_id: number,
     var_name: string,
@@ -848,62 +612,6 @@ export async function get_config(config_id: number): Promise<Promptconfig> {
   }
 }
 
-export async function update_template_vars(template_id: number, vars: Record<string, string> = {}, connection: mysql.Connection | mysql.Pool = pool){
-  try{
-    const sql_var_id = "SELECT id FROM PromptTemplate WHERE name = ?";
-    for (const [var_name, var_value] of Object.entries(vars)) {
-      const [rows] = await connection.execute(sql_var_id, [var_value]);
-      if ((rows as any[]).length > 0) {
-        const sub_template_id = (rows as any[])[0].id;
-        await save_sub_template(template_id, sub_template_id, var_name, connection);
-      }
-    }
-    return;
-  }
-  catch(error){
-    console.error(error);
-    throw error;
-  }
-}
-
-export async function add_config_base_dataset(config_id: number, dataset_id: number, connection: mysql.Connection | mysql.Pool = pool) {
-  try {
-    const sql = 'INSERT INTO config_base_dataset (config_id, dataset_id) VALUES (?, ?)';
-    await connection.execute(sql, [config_id, dataset_id]);
-  } catch (error) {
-    console.error('Error updating promptconfig with base dataset:', error);
-  }
-}
-
-export async function get_base_datasets(config_id: number){
-  try{
-    const sql = 'SELECT dataset_id FROM config_base_dataset WHERE config_id = ?';
-    const [rows] = await pool.execute(sql, [config_id]);
-    return (rows as any[]).map(row => row.dataset_id);
-  }
-    catch (error) {
-        console.error('Error fetching base datasets for config:', error);
-        return [];
-    }
-}
-
-export async function get_last_seen_result_id(template_id: number): Promise<number> {
-  const [rows]: any = await pool.query(
-      "SELECT last_seen_result_id FROM Template_dependency_progress WHERE template_id = ?",
-      [template_id]
-  );
-  return rows.length > 0 ? rows[0].last_seen_result_id : 0;
-}
-
-export async function update_template_dependency_progress(template_id: number, result_id: number): Promise<void> {
-  await pool.query(
-      `INSERT INTO Template_dependency_progress(template_id, last_seen_result_id)
-     VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE last_seen_result_id = GREATEST(last_seen_result_id, VALUES(last_seen_result_id))`,
-      [template_id, result_id]
-  );
-}
-
 export async function save_eval_result(eval_result: string, result_id: number, evaluator_id: number){
   try{
     const sql = 'INSERT INTO evaluationsresult(evaluation_result, result_id, evaluator_id) VALUES (?, ?, ?)';
@@ -929,14 +637,385 @@ export async function get_evaluation_result(result_id: number, evaluator_id: num
   }
 }
 
-export async function save_error_evaluator(evaluator_id: number, error_message: string, config_id: number, result_id: number, timestamp: string){
+export async function save_error_evaluator(evaluator_id: number, error_message: string, result_id: number, timestamp: string){
   try{
-    const sql = 'INSERT INTO error_evaluator(evaluator_id, error_message, config_id, result_id, timestamp) VALUES (?, ?, ?, ?, ?)';
-    const values = [evaluator_id, error_message, config_id, result_id, timestamp];
+    const sql = 'INSERT INTO error_evaluator(evaluator_id, error_message, result_id, timestamp) VALUES (?, ?, ?, ?, ?)';
+    const values = [evaluator_id, error_message, result_id, timestamp];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
   }
     catch (error) {
         console.error('Error saving error evaluator:', error);
+    }
+}
+
+export async function save_node(type: string, experiment_id: number, name:string, connection: mysql.Connection | mysql.Pool = pool): Promise<number> {
+  try {
+    const sql = 'INSERT INTO Node(type, experiment_id, name) VALUES (?, ?, ?)';
+    const [result] = await connection.execute(sql, [type, experiment_id, name]);
+    return (result as any).insertId;
+  } catch (error) {
+    throw error;
+  }
+}
+
+export async function get_node_by_name(name: string, experiment_id: number, connection: mysql.Connection | mysql.Pool = pool): Promise<Experiment_node | undefined> {
+  try {
+    const sql = 'SELECT * FROM Node WHERE name = ? AND experiment_id = ?';
+    const [rows] = await connection.execute(sql, [name, experiment_id]);
+    if ((rows as any[]).length > 0) {
+      return (rows as Experiment_node[])[0];
+    }
+    return undefined;
+  } catch (error) {
+    console.error('Error fetching node by name:', error);
+  }
+}
+
+export async function save_link(source_node_id: number, target_node_id: number, source_var: string, target_var: string, connection: mysql.Connection | mysql.Pool = pool){
+  try{
+    const sql = 'INSERT INTO Link(source_node_id, target_node_id, source_var, target_var) VALUES (?, ?, ?, ?)';
+    await connection.execute(sql, [source_node_id, target_node_id, source_var, target_var]);
+  }
+    catch (error) {
+        console.error('Error saving link:', error);
+    }
+}
+
+export async function get_configs_by_template_id(template_id: number, connection: mysql.Connection | mysql.Pool = pool): Promise<Promptconfig[]> {
+  try {
+    const sql = 'SELECT * FROM promptconfig WHERE prompt_template_id = ?';
+    const [rows] = await connection.execute(sql, [template_id]);
+    return rows as Promptconfig[];
+  } catch (error) {
+    console.error('Error fetching configs by template ID:', error);
+    return [];
+  }
+}
+
+export async function get_nodes_by_experiment(experiment_id: number){
+  try{
+    const sql = 'SELECT * FROM Node WHERE experiment_id = ?';
+    const [rows] = await pool.execute(sql, [experiment_id]);
+    return rows as Experiment_node[];
+  }
+    catch (error) {
+        console.error('Error fetching nodes by experiment:', error);
+        return [];
+    }
+}
+
+
+/**
+ * Fetches all links between nodes in a given experiment.
+ * Only includes links where both source and target nodes belong to the same experiment.
+ */
+export async function get_links_by_experiment(experimentId: number): Promise<Link[]> {
+  const query = `
+        SELECT l.source_node_id, l.target_node_id, l.source_var, l.target_var
+        FROM Link l
+        JOIN Node src ON l.source_node_id = src.id
+        JOIN Node tgt ON l.target_node_id = tgt.id
+        WHERE src.experiment_id = ? AND tgt.experiment_id = ?
+    `;
+
+  const [rows] = await pool.execute(query, [experimentId, experimentId]);
+  return rows as Link[];
+}
+
+export async function get_data_inputs_by_dataset(dataset_id: number): Promise<PromptVarsDict[]> {
+  const sql = `
+    SELECT
+      di.id AS input_id,
+      m.marker AS marker_name,
+      mv.value AS marker_value
+    FROM Data_Input di
+    JOIN Input_marker im ON di.id = im.input_id
+    JOIN Marker_value mv ON im.marker_values_id = mv.id
+    JOIN Marker m ON mv.marker_id = m.id
+    WHERE di.dataset_id = ?
+    ORDER BY di.id ASC
+  `;
+
+  const [rows] = await pool.execute(sql, [dataset_id]);
+
+  const grouped: Record<number, PromptVarsDict> = {};
+
+  for (const row of rows as any[]) {
+    const inputId = row.input_id;
+    if (!grouped[inputId]) grouped[inputId] = {};
+    grouped[inputId][row.marker_name] = row.marker_value;
+  }
+
+  return Object.values(grouped);
+}
+
+export async function update_final_dataset(config_id: number, dataset_id: number){
+  try{
+    await pool.execute('UPDATE promptconfig SET final_dataset_id = ? WHERE id = ?', [dataset_id, config_id]);
+  }
+    catch (error) {
+        console.error('Error updating final dataset:', error);
+    }
+}
+
+async function inputExists(node_id: number, input: PromptVarsDict): Promise<boolean> {
+  // Step 1: Resolve marker_value_ids for the input
+  const markerValueIds: number[] = [];
+
+  for (const [marker, value] of Object.entries(input)) {
+    const [markerRows] = await pool.execute(
+        'SELECT id FROM Marker WHERE marker = ? AND dataset_id = ?',
+        [marker, node_id]
+    );
+    if ((markerRows as any[]).length === 0) return false;
+    const marker_id = (markerRows as any[])[0].id;
+
+    const hash = computeMarkerValueHash(marker_id, value);
+    const [valueRows] = await pool.execute(
+        'SELECT id FROM Marker_value WHERE marker_id = ? AND hash = ?',
+        [marker_id, hash]
+    );
+    if ((valueRows as any[]).length === 0) return false;
+
+    markerValueIds.push((valueRows as any[])[0].id);
+  }
+
+  if (markerValueIds.length === 0) return false;
+
+  // Step 2: Find inputs with the exact same marker values (no more, no less)
+  const placeholders = markerValueIds.map(() => '?').join(',');
+
+  const [rows] = await pool.execute(
+      `
+    SELECT im.input_id
+    FROM Input_marker im
+    GROUP BY im.input_id
+    HAVING 
+      COUNT(*) = ? AND
+      SUM(im.marker_values_id IN (${placeholders})) = ?
+    `,
+      [markerValueIds.length, ...markerValueIds, markerValueIds.length]
+  );
+
+  return (rows as any[]).length > 0;
+}
+
+export async function add_rows_to_dataset(node_id: number, inputs: PromptVarsDict[]): Promise<void> {
+  for (const input of inputs){
+    // Check if input already exists
+    const exists = await inputExists(node_id, input);
+    if (exists) continue;
+
+    const input_result = await pool.execute('INSERT INTO Data_Input (dataset_id) VALUES (?)', [node_id]);
+    const input_id = (input_result[0] as any).insertId;
+    for (const [marker, value] of Object.entries(input)){
+      const marker_result = await pool.execute('SELECT id FROM Marker WHERE marker = ? AND dataset_id = ?', [marker, node_id]);
+      let marker_id: number;
+      if ((marker_result[0] as any[]).length === 0) {
+        const insertMarker = await pool.execute('INSERT INTO Marker (marker, dataset_id) VALUES (?, ?)', [marker, node_id]);
+        marker_id = (insertMarker[0] as any).insertId;
+      } else {
+        marker_id = (marker_result[0] as any[])[0].id;
+      }
+      const hash = computeMarkerValueHash(marker_id, value);
+      const value_result = await pool.execute('SELECT id FROM Marker_value WHERE marker_id = ? AND hash = ?', [marker_id, hash]);
+      let marker_value_id: number;
+      if ((value_result[0] as any[]).length === 0) {
+        const insertValue = await pool.execute('INSERT INTO Marker_value (marker_id, value) VALUES (?, ?)', [marker_id, value]);
+        marker_value_id = (insertValue[0] as any).insertId;
+      } else {
+        marker_value_id = (value_result[0] as any[])[0].id;
+      }
+      await pool.execute('INSERT INTO Input_marker (input_id, marker_values_id) VALUES (?, ?)', [input_id, marker_value_id]);
+    }
+  }
+}
+
+export async function save_dataset_inputs(inputs: PromptVarsDict[], experiment_id: number){
+  try{
+    const uuid: string = crypto.randomUUID();
+    const node_result = await pool.execute('INSERT INTO Node (type, experiment_id, name) VALUES (?, ?, ?)', ['dataset', experiment_id, uuid]);
+    const node_id: number = (node_result[0] as any).insertId;
+    await pool.execute('INSERT INTO Dataset (name, node_id) VALUES (?, ?)', [uuid, node_id]);
+    await add_rows_to_dataset(node_id, inputs);
+    return node_id;
+  }
+    catch (error) {
+        console.error('Error saving dataset input:', error);
+    }
+}
+
+/**
+ * Retrieves the parent that are datasets of a given node.
+ * @param node_id
+ * @param type
+ * @return An array of id of datasets that are parents of the given node.
+ */
+export async function get_parents(node_id: number, type: string): Promise<number[]>{
+  try{
+    const sql = `
+    SELECT DISTINCT source_node_id FROM Link JOIN Node ON Link.source_node_id = Node.id WHERE Node.type = ? AND target_node_id = ?
+    `;
+    const [rows] = await pool.execute(sql, [type, node_id]);
+    return (rows as any[]).map(row => row.source_node_id);
+  }
+    catch (error) {
+        console.error('Error fetching parent datasets:', error);
+        return [];
+    }
+}
+
+export async function get_target_var(source_id: number, target_id: number, source_var: string){
+  try{
+    const sql = `SELECT target_var FROM Link WHERE source_node_id = ? AND target_node_id = ? AND source_var = ?`;
+    const [rows] = await pool.execute(sql, [source_id, target_id, source_var]);
+    if ((rows as any[]).length > 0) {
+      return (rows as any[])[0].target_var;
+    }
+  }
+    catch (error) {
+        console.error('Error fetching target variable:', error);
+    }
+}
+
+export async function get_processor_results_by_id(processor_id: number){
+  try{
+    const sql = 'SELECT * FROM processor_result WHERE processor_id = ?';
+    const [rows] = await pool.execute(sql, [processor_id]);
+    return rows as ProcessorResult[];
+  }
+    catch (error) {
+        console.error('Error fetching processor results:', error);
+        return [];
+    }
+}
+
+export async function get_links_by_target(target_id: number){
+  try{
+    const sql = 'SELECT * FROM Link WHERE target_node_id = ?';
+    const [rows] = await pool.execute(sql, [target_id]);
+    return rows as Link[];
+    }
+    catch (error) {
+        console.error('Error fetching links by target:', error);
+        return [];
+    }
+}
+
+export async function get_node_by_id(node_id:number){
+    try {
+        const sql = 'SELECT * FROM Node WHERE id = ?';
+        const [rows] = await pool.execute(sql, [node_id]);
+        if ((rows as any[]).length > 0) {
+        return (rows as Experiment_node[])[0];
+        }
+        return undefined;
+    } catch (error) {
+        console.error('Error fetching node by ID:', error);
+    }
+}
+
+export async function get_evaluator_by_id(evaluator_id: number){
+  try{
+    const sql = 'SELECT * FROM Evaluator WHERE node_id = ?';
+    const [rows] = await pool.execute(sql, [evaluator_id]);
+    if ((rows as any[]).length > 0) {
+      return (rows as Evaluator[])[0];
+    }
+    return undefined;
+  }
+    catch (error) {
+        console.error('Error fetching evaluator by ID:', error);
+    }
+}
+
+export async function get_results_by_processor(processor_id: number){
+  try{
+    const sql = 'SELECT * FROM processor_result WHERE processor_id = ?';
+    const [rows] = await pool.execute(sql, [processor_id]);
+    return rows as ProcessorResult[];
+  }
+    catch (error) {
+        console.error('Error fetching processor results:', error);
+        return [];
+    }
+}
+
+export async function get_result_by_id(result_id: number){
+  try{
+    const sql = 'SELECT * FROM result WHERE id = ?';
+    const [rows] = await pool.execute(sql, [result_id]);
+    if ((rows as any[]).length > 0) {
+      return (rows as Result[])[0];
+    }
+    return undefined;
+  }
+    catch (error) {
+        console.error('Error fetching result by ID:', error);
+    }
+}
+
+export async function get_processor_by_id(processor_id: number){
+    try{
+        const sql = 'SELECT * FROM processor WHERE node_id = ?';
+        const [rows] = await pool.execute(sql, [processor_id]);
+        if ((rows as any[]).length > 0) {
+        return (rows as ExperimentProcessor[])[0];
+        }
+        return undefined;
+    }
+        catch (error) {
+            console.error('Error fetching processor by ID:', error);
+        }
+}
+
+export async function save_error_processor(processor_id: number, error_message: string, result_id: number, input_id: number, timestamp: string){
+  try{
+    const sql = 'INSERT INTO error_processor(processor_id, error_message, result_id, input_id, timestamp) VALUES (?, ?, ?, ?, ?)';
+    const values = [processor_id, error_message, result_id, input_id, timestamp];
+    const [result] = await pool.execute(sql, values);
+    return (result as any).insertId;
+  }
+    catch (error) {
+        console.error('Error saving error processor:', error);
+    }
+}
+
+export async function save_process_result(processor_result: string, result_id: number, processor_id: number, input_id: number){
+  try{
+    const sql = 'INSERT INTO processor_result(processor_result, result_id, processor_id, input_id) VALUES (?, ?, ?, ?)';
+    const values = [processor_result, result_id, processor_id, input_id];
+    const [result] = await pool.execute(sql, values);
+    return (result as any).insertId;
+  }
+    catch (error) {
+        console.error('Error saving process result:', error);
+    }
+}
+
+export async function get_processor_result_by_input_id(input_id: number, processor_id: number){
+    try {
+        const sql = 'SELECT * FROM processor_result WHERE input_id = ? AND processor_id = ?';
+        const [rows] = await pool.execute(sql, [input_id, processor_id]);
+        if ((rows as any[]).length > 0) {
+        return (rows as ProcessorResult[])[0];
+        }
+        return undefined;
+    } catch (error) {
+        console.error('Error fetching processor result by input ID:', error);
+    }
+}
+
+export async function get_processor_result_by_result_id(result_id: number, processor_id: number){
+    try {
+        const sql = 'SELECT * FROM processor_result WHERE result_id = ? AND processor_id = ?';
+        const [rows] = await pool.execute(sql, [result_id, processor_id]);
+        if ((rows as any[]).length > 0) {
+            return (rows as ProcessorResult[])[0];
+        }
+        return undefined;
+    } catch (error) {
+        console.error('Error fetching processor result by result ID:', error);
     }
 }

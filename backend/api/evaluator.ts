@@ -6,14 +6,14 @@ import {cleanEscapedBraces} from "../template";
 
 type EvalOrProcessResult = { result_id: number; result?: any; error?: any };
 type EvalOrProcessResponse = {
-    responses?: EvalOrProcessResult[];
+    response?: EvalOrProcessResult;
     logs?: string[];
     error?: string;
 }
 
 export async function executejs(
     code: string | ((rinfo: ResponseInfo) => any),
-    results: Result[],
+    result: Result,
     vars: PromptVarsDict,
     metavars: Dict,
     llm_name: string,
@@ -57,9 +57,9 @@ export async function executejs(
     }
 
     try {
-        const responses = await run_over_responses(
+        const response = await run_over_response(
             process_func,
-            results,
+            result,
             vars,
             metavars,
             llm_name,
@@ -67,7 +67,7 @@ export async function executejs(
             process_type,
         );
 
-        return { responses, logs: all_logs };
+        return { response, logs: all_logs };
     } catch (err) {
         return {
             error: `Error encountered while trying to run "${req_func_name}" method:\n${(err as Error).message}`,
@@ -78,18 +78,17 @@ export async function executejs(
 
 
 
-export async function run_over_responses(
+export async function run_over_response(
     process_func: (resp: ResponseInfo) => any,
-    results: Result[],
+    result: Result,
     vars: PromptVarsDict,
     metavars: Dict,
     llm_name: string,
     prompt: string,
     process_type: "evaluator" | "processor",
 ): Promise<
-    { result_id: number; result?: any; error?: string }[]
+    { result_id: number; result?: any; error?: string }
 > {
-    const evald_resps = results.map(async (result) => {
         const r_info = new ResponseInfo(
             cleanEscapedBraces(result.output_result),
             prompt,
@@ -111,7 +110,4 @@ export async function run_over_responses(
                 error: (err as Error).message,
             };
         }
-    });
-
-    return await Promise.all(evald_resps);
 }

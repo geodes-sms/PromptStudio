@@ -1,4 +1,4 @@
-import {encoding_for_model} from "@dqbd/tiktoken";
+import {encoding_for_model, TiktokenModel} from "@dqbd/tiktoken";
 
 export function getTokenCount(model:string, text:string){
     try {
@@ -14,7 +14,7 @@ export function getTokenCount(model:string, text:string){
 
 function getEncoder(model: string){
     try{
-        return encoding_for_model(model);
+        return encoding_for_model(model as TiktokenModel);
     }
     catch (error) {
         return getEncoder('gpt2');

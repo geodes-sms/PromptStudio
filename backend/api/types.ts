@@ -22,7 +22,7 @@ export enum Eval_type {
 }
 
 export type Evaluator = {
-  id: number;
+  node_id: number;
   type: Eval_type;
   file?: string;
   code?: string;
@@ -48,7 +48,7 @@ export type Input = {
 }
 
 export type prompttemplate = {
-  id : number;
+  node_id : number;
   value: string;
   name: string;
   iterations: number;
@@ -75,8 +75,9 @@ export type Llm_params = {
 }
 
 export type Dataset = {
-  id: number;
+  node_id: number;
   name: string;
+  path: string;
 }
 
 export type Result = {
@@ -86,4 +87,47 @@ export type Result = {
   input_id: number;
   start_time: Date;
   end_time: Date;
+}
+
+export enum NodeType{
+  'prompt_template'= 'prompt_template',
+  'processor'= 'processor',
+  'evaluator'= 'evaluator',
+  'dataset'= 'dataset',
+}
+
+export type Experiment_node = {
+  id: number;
+  type: NodeType;
+  experiment_id: number;
+  name: string;
+}
+
+export type Link = {
+  source_node_id: number;
+  target_node_id: number;
+  source_var: string | null;
+  target_var: string | null;
+}
+
+export type ProcessorResult = {
+  processor_result: string;
+  result_id?: number;
+  processor_id: number;
+  input_id?: number;
+}
+
+export type ExperimentProcessor = {
+  node_id: number;
+  type: Eval_type;
+  code: string;
+  name: string;
+}
+
+export type db_credentials = {
+  host: string;
+  port?: number;
+  user: string;
+  password: string;
+  database: string;
 }

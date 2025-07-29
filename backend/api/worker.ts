@@ -2,19 +2,17 @@
 import workerpool from 'workerpool';
 import {queryLLM} from "../backend";
 import {
-    get_evaluation_result,
-    get_evaluators_by_config,
-    get_results,
-    save_error, save_error_evaluator, save_eval_result,
+    get_evaluator_by_id, get_processor_by_id,
+    save_error, save_error_evaluator, save_error_processor, save_eval_result, save_process_result,
     save_response
 } from "../database/database";
 import {Dict, LLMSpec, PromptVarsDict} from "../typing";
 import {executejs} from "./evaluator";
-import {Result} from "./types";
+import {ExperimentProcessor, Result} from "./types";
 
 /**
  * Processes an experiment by querying the LLM with the given parameters and saving the responses.
- * This function is designed to be run in a worker thread, allowing for parallel processing of multiple experiments.
+ * This function is designed to be run in a worker thread, allowing for parallel processing.
  * @param config_id The ID of the configuration to use for the experiment.
  * @param llm_spec The specification of the LLM to use for the experiment.
  * @param iterations The number of iterations to run the experiment for.
@@ -27,9 +25,9 @@ import {Result} from "./types";
 async function processExperiment(config_id: number, llm_spec: LLMSpec, iterations: number,
                                  template_value: string, markersDict: PromptVarsDict,
                                  input_id: number, api_keys: Dict<string>, tries: number = 0 ): Promise<{success: boolean, tries: number}> {
-    const start_time = new Date().toISOString().replace('T', ' ').replace('Z', ' ');
     // @ts-ignore
     const safe_api_keys = JSON.parse(api_keys);
+    const start_time = new Date().toISOString().replace('T', ' ').replace('Z', ' ');
     const responses = await queryLLM(
         config_id.toString(),
         [llm_spec],
@@ -43,7 +41,6 @@ async function processExperiment(config_id: number, llm_spec: LLMSpec, iteration
             await save_response(config_id, llm_response, input_id, start_time, end_time, response.tokens.total_tokens / responses.responses.length);
         }
     }
-
     if (responses.errors && Object.keys(responses.errors).length > 0){
         for (const key of Object.keys(responses.errors)) {
             for (const err of responses.errors[key]) {
@@ -53,39 +50,43 @@ async function processExperiment(config_id: number, llm_spec: LLMSpec, iteration
             }
         }
     }
-
-    await evaluate(config_id, input_id, llm_spec, markersDict, template_value);
-
     return {success: true, tries: tries};
 }
 
-async function evaluate(config_id: number, input_id: number, LLMSpec: LLMSpec, markersDict: PromptVarsDict, template_value: string) {
-    const results = await get_results(config_id, input_id);
-    const evaluators = await get_evaluators_by_config(config_id);
+async function evaluate(evaluator_id: number, LLMSpec: LLMSpec, markersDict: PromptVarsDict, template_value: string, result: Result) {
+    const evaluator = await get_evaluator_by_id(evaluator_id);
+    const eval_result = await executejs(evaluator.code, result, markersDict, {}, LLMSpec.base_model, template_value, "evaluator");
+    // Check if there is an error in the evaluator itself
+    if (eval_result.error) {
+        await save_error_evaluator(evaluator.node_id, eval_result.error, result.id, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
+        return;
+    }
+    // Check if there is an error in the evaluation result
+    if (eval_result.response.error) {
+        await save_error_evaluator(evaluator.node_id, eval_result.response.error, eval_result.response.result_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
+    } else {
+        const result = eval_result.response.result;
+        if (result) {
+            await save_eval_result(result, eval_result.response.result_id, evaluator.node_id);
+        }
+    }
+}
 
-    for (const evaluator of evaluators) {
-        // Check for each result and for each evalyator if the result is already evaluated
-        const results_to_evaluate: Result[] = [];
-        for (const result of results) {
-            const existingEval = await get_evaluation_result(result.id, evaluator.id);
-            if (!existingEval) {
-                results_to_evaluate.push(result);
-            }
-        }
-        const eval_results = await executejs(evaluator.code, results_to_evaluate, markersDict, {}, LLMSpec.base_model, template_value, "evaluator");
-        if (eval_results.error) {
-            await save_error_evaluator(evaluator.id, eval_results.error, config_id, null, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
-            continue;
-        }
-        for (const eval_result of eval_results.responses) {
-            if (eval_result.error) {
-                await save_error_evaluator(evaluator.id, eval_result.error, config_id, eval_result.result_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
-            } else {
-                const result = eval_result.result;
-                if (result) {
-                    await save_eval_result(result, eval_result.result_id, evaluator.id);
-                }
-            }
+async function process(processor_id: number, LLMSpec: LLMSpec,  markersDict: PromptVarsDict, template_value: string, result: Result, input_id: number) {
+    const processor: ExperimentProcessor = await get_processor_by_id(processor_id);
+    const process_result = await executejs(processor.code, result, markersDict, {}, LLMSpec.base_model, template_value, "processor");
+    // Check if there is an error in the processor itself
+    if (process_result.error) {
+        await save_error_processor(processor.node_id, process_result.error, result.id, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
+        return;
+    }
+    // Check if there is an error in the process result
+    if (process_result.response.error) {
+        await save_error_processor(processor.node_id, process_result.response.error, process_result.response.result_id, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
+    } else {
+        const result = process_result.response.result;
+        if (result) {
+            await save_process_result(result, process_result.response.result_id, processor.node_id, input_id);
         }
     }
 }
@@ -93,4 +94,5 @@ async function evaluate(config_id: number, input_id: number, LLMSpec: LLMSpec, m
 workerpool.worker({
     processExperiment: processExperiment,
     evaluate: evaluate,
+    process: process,
 });
