@@ -12,6 +12,15 @@ import {ExperimentRunner} from "./ExperimentRunner";
 import {Dict} from "../typing";
 import {EvaluatorRunner} from "./EvaluatorRunner";
 
+/**
+ * Runs a template by its node ID, resolving inputs and managing datasets.
+ * It retrieves configurations for the template, checks if a final dataset already exists,
+ * and if not, creates a new dataset with the inputs. It then updates the final datasets
+ * for each configuration and runs the experiment using the ExperimentRunner.
+ * @param node_id The ID of the node representing the template to run.
+ * @param api_keys A dictionary of API keys to use for the experiment.
+ * @param experiment The experiment object containing details like title and threads.
+ */
 async function run_template(node_id: number, api_keys: Dict<string>, experiment: Experiment) {
     try{
         const inputs = await resolve_inputs(node_id);
@@ -44,6 +53,11 @@ async function run_template(node_id: number, api_keys: Dict<string>, experiment:
     }
 }
 
+/**
+ * Runs an evaluator for a given experiment creating a new EvaluatorRunner instance.
+ * @param evaluator_id The ID of the evaluator node to run.
+ * @param experiment The experiment object containing details like title and threads.
+ */
 async function run_evaluator(evaluator_id: number, experiment: Experiment){
     try{
         const num_workers = experiment.threads || 1;
@@ -55,6 +69,12 @@ async function run_evaluator(evaluator_id: number, experiment: Experiment){
     }
 }
 
+/**
+ * Runs a processor for a given experiment creating a new EvaluatorRunner instance.
+ * This function is similar to run_evaluator but is used for processing data rather than evaluating it
+ * @param processor_id The ID of the processor node to run.
+ * @param experiment The experiment object containing details like title and threads.
+ */
 async function run_processor(processor_id: number, experiment: Experiment){
     try{
         const num_workers = experiment.threads || 1;
@@ -66,16 +86,25 @@ async function run_processor(processor_id: number, experiment: Experiment){
     }
 }
 
-
+/**
+ * Runs an experiment by its name, retrieving the experiment details,
+ * nodes, and links from the database. It performs a topological sort on the nodes
+ * to ensure that dependencies are resolved correctly before executing each node
+ * based on its type (dataset, prompt template, evaluator, or processor).
+ * @param experiment_name The name of the experiment to run.
+ * @param api_keys A dictionary of API keys to use for the experiment.
+ */
 export async function run_experiment(experiment_name: string, api_keys: Dict<string>) {
     try{
         const experiment = await get_experiment_by_name(experiment_name);
         const nodes = await get_nodes_by_experiment(experiment.id);
         const links = await get_links_by_experiment(experiment.id);
+        // Sort nodes topologically to ensure dependencies are resolved
         const sorted_nodes = topologicalSort(nodes, links);
         for (const node of sorted_nodes){
             switch (node.type) {
                 case NodeType.dataset:
+                    // Nothing to do here
                     break;
                 case NodeType.prompt_template:
                     await run_template(node.id, api_keys, experiment);
@@ -102,19 +131,29 @@ export async function run_experiment(experiment_name: string, api_keys: Dict<str
  * @param links An array of Link objects representing the edges between nodes.
  */
 function topologicalSort(nodes: Experiment_node[], links: Link[]): Experiment_node[] {
+    if (nodes.length === 0) {
+        return [];
+    }
+    if (links.length === 0) {
+        return nodes; // No dependencies, return nodes as is
+    }
+    // Initialize in-degree and graph structures, inDegree keeps track of the number of incoming edges for each node
     const inDegree = new Map<number, number>();
+    // graph keeps track of outgoing edges for each node
     const graph = new Map<number, number[]>();
 
+    // Initialize in-degree and graph for each node
     for (const node of nodes) {
         inDegree.set(node.id, 0);
         graph.set(node.id, []);
     }
-
+    // Populate the graph and in-degree map based on the links
     for (const link of links) {
         graph.get(link.source_node_id)!.push(link.target_node_id);
         inDegree.set(link.target_node_id, inDegree.get(link.target_node_id)! + 1);
     }
-
+    // Kahn's algorithm for topological sorting
+    // Start with nodes that have no incoming edges (in-degree of 0)
     const queue: number[] = nodes.filter(n => inDegree.get(n.id) === 0).map(n => n.id);
     const result: Experiment_node[] = [];
 
@@ -135,5 +174,8 @@ function topologicalSort(nodes: Experiment_node[], links: Link[]): Experiment_no
         throw new Error("Cycle detected in graph — dependency resolution failed.");
     }
 
-    return result;
+    // Ensure that evaluators are always at the end of the sorted list because they should run after all other nodes
+    const nonEvaluators = result.filter(n => n.type !== 'evaluator');
+    const evaluators = result.filter(n => n.type === 'evaluator');
+    return [...nonEvaluators, ...evaluators];
 }
