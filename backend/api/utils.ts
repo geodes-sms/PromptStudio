@@ -26,6 +26,14 @@ export function create_llm_spec(llm: LLMSpec, llm_param: Llm_params): LLMSpec {
         settings,
     };
 }
+
+/**
+ * Generates a marker map from the input markers.
+ * This function retrieves the marker names by their IDs and maps them to their corresponding values.
+ * It is used to create a dictionary of markers that can be used in LLM queries.
+ * @param input The Input object containing the markers to be processed.
+ * @returns A dictionary where the keys are marker names and the values are their corresponding values.
+ */
 export async function get_marker_map(input: Input) {
     const markersDict: PromptVarsDict = {};
     for (const marker of input.markers) {

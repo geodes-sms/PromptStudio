@@ -53,6 +53,16 @@ async function processExperiment(config_id: number, llm_spec: LLMSpec, iteration
     return {success: true, tries: tries};
 }
 
+/**
+ * Evaluates a result using the specified evaluator.
+ * This function executes the evaluator's code and saves the evaluation result or error.
+ * It is designed to be run in a worker thread, allowing for parallel processing.
+ * @param evaluator_id The ID of the evaluator to use for the evaluation.
+ * @param LLMSpec The specification of the LLM to use for the evaluation.
+ * @param markersDict A dictionary of markers to use in the evaluation.
+ * @param template_value The template value to use for the evaluation.
+ * @param result The result to evaluate, which contains the response from the LLM.
+ */
 async function evaluate(evaluator_id: number, LLMSpec: LLMSpec, markersDict: PromptVarsDict, template_value: string, result: Result) {
     const evaluator = await get_evaluator_by_id(evaluator_id);
     const eval_result = await executejs(evaluator.code, result, markersDict, {}, LLMSpec.base_model, template_value, "evaluator");
@@ -72,6 +82,17 @@ async function evaluate(evaluator_id: number, LLMSpec: LLMSpec, markersDict: Pro
     }
 }
 
+/**
+ * Processes a result using the specified processor.
+ * This function executes the processor's code and saves the processed result or error.
+ * It is designed to be run in a worker thread, allowing for parallel processing.
+ * @param processor_id The ID of the processor to use for processing the result.
+ * @param LLMSpec The specification of the LLM to use for processing.
+ * @param markersDict A dictionary of markers to use in the processing.
+ * @param template_value The template value to use for the processing.
+ * @param result The result to process, which contains the response from the LLM.
+ * @param input_id The ID of the input to use for the processing, used for saving results and errors.
+ */
 async function process(processor_id: number, LLMSpec: LLMSpec,  markersDict: PromptVarsDict, template_value: string, result: Result, input_id: number) {
     const processor: ExperimentProcessor = await get_processor_by_id(processor_id);
     const process_result = await executejs(processor.code, result, markersDict, {}, LLMSpec.base_model, template_value, "processor");

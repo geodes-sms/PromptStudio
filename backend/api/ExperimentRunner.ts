@@ -73,9 +73,9 @@ export class ExperimentRunner {
     /**
      * Produces tasks for the experiment based on the provided configurations.
      */
-    private async produceTasks() {
+    private async produceTasks(maximumQueueSize: number = 1000) {
         const experiment = await get_experiment_by_name(this.experiment_name);
-
+        // Create a task for each input inside each configuration for a prompt_template node
         for (const config of this.configs) {
             const updatedConfig = await get_config(config.id);
             const llm = await get_llm_by_id(updatedConfig.LLM_id);
@@ -86,6 +86,7 @@ export class ExperimentRunner {
             let input_id = 0;
             const last_id = await get_last_input_id(updatedConfig.final_dataset_id);
 
+            // Create a task for each input in the final dataset
             while (input_id !== last_id) {
                 const input = await get_next_input(updatedConfig.final_dataset_id, input_id);
                 if (!input) break;
@@ -96,7 +97,7 @@ export class ExperimentRunner {
                 let iterations = template.iterations;
                 const existing = await get_results(updatedConfig.id, input_id);
                 if (existing?.length) iterations -= existing.length;
-                // Ensure we still have iterations to run for a given input
+                // Ensure we still have iterations to run for a given input and config
                 if (iterations <= 0) {
                     continue;
                 }
@@ -113,7 +114,7 @@ export class ExperimentRunner {
                 });
 
                 // maximum queue size check
-                while (this.taskQueue.length > 1000) {
+                while (this.taskQueue.length > maximumQueueSize) {
                     await new Promise((res) => setTimeout(res, 50));
                 }
             }
@@ -182,34 +183,6 @@ export class ExperimentRunner {
             this.failedQueue.set(result.tries, triesBucket);
         } else if (!result.success) {
             this.errors++;
-            // this.bar.tick();
-        } else {
-            // this.bar.tick();
         }
-    }
-
-    private async taskEvaluator() {
-        while (this.isProducing || this.taskQueue.length > 0) {
-            let task: Task | undefined;
-
-            if (this.taskQueue.length > 0) {
-                task = this.taskQueue.shift();
-            }
-            if (!task) {
-                await new Promise((res) => setTimeout(res, 50));
-                continue;
-            }
-            await this.submitEvaluation(task);
-        }
-    }
-
-    private async submitEvaluation(task: Task){
-        await this.pool.exec("evaluate",[
-            task.config_id,
-            task.input_id,
-            task.llm_spec,
-            task.markersDict,
-            task.template_value
-        ]);
     }
 }

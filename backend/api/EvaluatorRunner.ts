@@ -27,6 +27,10 @@ type EvaluationTask = {
     result: Result;
 }
 
+/**
+ * Class to manage the evaluation of results using multi-threading.
+ * It produces tasks based on the results and processes them using worker threads.
+ */
 export class EvaluatorRunner {
     private taskQueue: EvaluationTask[] = [];
     private isProducing = true;
@@ -47,6 +51,11 @@ export class EvaluatorRunner {
         });
     }
 
+    /**
+     * Evaluates the results by producing tasks and processing them using worker threads.
+     * It retrieves links by target node, fetches inputs and results, and adds them to the task queue.
+     * Each worker thread will execute the `evaluate` function to process the tasks
+     */
     public async evaluate(){
         await Promise.all([
             this.produceTasks(),
@@ -55,6 +64,12 @@ export class EvaluatorRunner {
         await this.pool.terminate();
     }
 
+    /**
+     * Processes the results by producing tasks and processing them using worker threads.
+     * It retrieves links by target node, fetches inputs and processor results, and adds them
+     * to the task queue.
+     * Each worker thread will execute the `process` function to process the tasks.
+     */
     public async process(){
         await Promise.all([
             this.produceTasks(),
@@ -63,7 +78,13 @@ export class EvaluatorRunner {
         await this.pool.terminate();
     }
 
-    private async produceTasks(){
+    /**
+     * Produces tasks for evaluation or processing based on the node type.
+     * It retrieves links by target node, fetches inputs and results, and adds them to the task queue.
+     * The tasks are created based on the type of the parent node (dataset, prompt template, or processor).
+     * @param maximumQueueSize The maximum size of the task queue to prevent memory overflow.
+     */
+    private async produceTasks(maximumQueueSize: number = 1000){
         const links = await get_links_by_target(this.node_id);
         for (const link of links){
             const parent_node = await get_node_by_id(link.source_node_id);
@@ -179,10 +200,17 @@ export class EvaluatorRunner {
                     this.taskQueue.push(task);
                 }
             }
+            // maximum queue size check
+            while (this.taskQueue.length > maximumQueueSize) {
+                await new Promise((res) => setTimeout(res, 50));
+            }
         }
         this.isProducing = false;
     }
 
+    /**
+     * Evaluates tasks in the task queue using worker threads.
+     */
     private async taskEvaluator() {
         while (this.isProducing || this.taskQueue.length > 0) {
             if (this.taskQueue.length === 0) {
@@ -202,6 +230,10 @@ export class EvaluatorRunner {
         }
     }
 
+    /**
+     * Processes tasks in the task queue using worker threads.
+     * This method is similar to taskEvaluator but is used for processing data rather than evaluating it.
+     */
     private async taskProcessor() {
         while (this.isProducing || this.taskQueue.length > 0) {
             if (this.taskQueue.length === 0) {
