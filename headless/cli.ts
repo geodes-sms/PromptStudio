@@ -59,6 +59,11 @@ async function main() {
     }
 
     if (options.config) {
+        // Check if the provided config file exists
+        if (!fs.existsSync(options.config)) {
+            console.error(`Configuration file not found: ${options.config}`);
+            process.exit(1);
+        }
         const name = await save_config(options.config);
         console.log(`Experiment saved as: ${name}`);
         const validate = await validateRun(name);
