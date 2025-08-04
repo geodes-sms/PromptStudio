@@ -1,3 +1,5 @@
+import {LLMSpec} from "../typing";
+
 export type Experiment = {
   id: number;
   title: string;
@@ -52,7 +54,7 @@ export type prompttemplate = {
   value: string;
   name: string;
   iterations: number;
-  vars?: Record<string, string>;
+  llms: LLMSpec[];
 }
 
 export type Llm = {

@@ -25,16 +25,24 @@ import {
 } from "../database/database";
 // @ts-ignore
 import yaml from "js-yaml";
-import {Dataset, Evaluator, Experiment_node, Llm_params, ProcessorResult, Promptconfig} from "./types";
+import {Dataset, Evaluator, Experiment_node, Llm_params, ProcessorResult, Promptconfig, prompttemplate} from "./types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {get_marker_map} from "./utils";
 import {PromptPermutationGenerator} from "../template";
 import {getTokenCount} from "./token";
 import {PoolConnection} from "mysql2/promise";
 
-async function handle_save_template(template: any, connection: PoolConnection, experiment_id: number){
+/**
+ * Handles saving a prompt template to the database.
+ * It saves the template itself, its associated LLMs, and their parameters.
+ * @param template The prompt template to save.
+ * @param connection The database connection to use for saving.
+ * @param experiment_id The ID of the experiment to which the template belongs.
+ */
+async function handle_save_template(template: prompttemplate, connection: PoolConnection, experiment_id: number){
     const node_id = await save_node('prompt_template', experiment_id, template.name, connection);
     await save_template(template.value, template.name, template.iterations || 1, {}, node_id, connection);
+    // Save 1 config for each LLM in the template
     for (const llm of template.llms as LLMSpec[]) {
         const existing = await get_llm_by_base_model(llm.base_model, connection);
         const llm_id = existing ? existing.id : await save_llm(llm, connection);
@@ -63,6 +71,13 @@ async function handle_save_template(template: any, connection: PoolConnection, e
     }
 }
 
+/**
+ * Handles saving a dataset node to the database.
+ * @param dataset The dataset to save.
+ * @param connection The database connection to use for saving.
+ * @param file_map A map of file fields to their uploaded files.
+ * @param experiment_id The ID of the experiment to which the dataset belongs.
+ */
 async function handle_save_dataset(dataset: Dataset, connection:PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
     const node_id = await save_node('dataset', experiment_id, dataset.name, connection);
     const fileField = `file:${dataset.path}`;
@@ -70,6 +85,13 @@ async function handle_save_dataset(dataset: Dataset, connection:PoolConnection, 
     await save_dataset(datasetPath, node_id, dataset.name, connection);
 }
 
+/**
+ * Handles saving an evaluator node to the database.
+ * @param evaluator The evaluator to save.
+ * @param connection The database connection to use for saving.
+ * @param file_map A map of file fields to their uploaded files.
+ * @param experiment_id The ID of the experiment to which the evaluator belongs.
+ */
 async function handle_save_evaluator(evaluator: Evaluator, connection: PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
     const node_id = await save_node('evaluator', experiment_id, evaluator.name, connection);
     const fileField = `evaluator:${evaluator.file}`;
@@ -78,6 +100,13 @@ async function handle_save_evaluator(evaluator: Evaluator, connection: PoolConne
     await save_evaluator({ ...evaluator, code: evaluatorCode, node_id: node_id }, connection);
 }
 
+/**
+ * Handles saving a processor node to the database.
+ * @param processor The processor to save.
+ * @param connection The database connection to use for saving.
+ * @param file_map A map of file fields to their uploaded files.
+ * @param experiment_id The ID of the experiment to which the processor belongs.
+ */
 async function handle_save_processor(processor: any, connection: PoolConnection, file_map: Record<string, Express.Multer.File[]>, experiment_id: number){
     const node_id = await save_node('processor', experiment_id, processor.name, connection);
     const fileField = `processor:${processor.file}`;
@@ -86,17 +115,24 @@ async function handle_save_processor(processor: any, connection: PoolConnection,
     await save_processor({ ...processor, code: processorCode, node_id: node_id }, connection);
 }
 
+/**
+ * Saves a configuration from a YAML file to the database.
+ * @param yml_path The path to the YAML configuration file.
+ * @param file_map A map of file fields to their uploaded files.
+ */
 export async function save_config(
     yml_path: string, file_map: Record<string, Express.Multer.File[]>
 ){
     const connection: PoolConnection = await pool.getConnection();
     try{
+        // Begin transaction to ensure we can rollback in case of errors
         await connection.beginTransaction();
         const raw = fs.readFileSync(yml_path, "utf-8");
         const parsed: any = yaml.load(raw);
         let experimentName = parsed.experiment.title;
         let counter = 1;
         let existingExperiment = await get_experiment_by_name(experimentName, connection);
+        // Ensure unique experiment name
         while (existingExperiment) {
             experimentName = `${parsed.experiment.title}_${counter++}`;
             existingExperiment = await get_experiment_by_name(experimentName, connection);
@@ -104,6 +140,7 @@ export async function save_config(
         // Save experiment
         const experiment_id = await save_experiment({ ...parsed.experiment, title: experimentName }, connection);
         const promises: Promise<any>[] = [];
+        // Save each node in the configuration
         for (const node of parsed.nodes){
             if (node.template){
                 await handle_save_template(node.template, connection, experiment_id);
@@ -123,6 +160,7 @@ export async function save_config(
         }
         await Promise.all(promises);
         const promisesLinks: Promise<any>[] = [];
+        // Save links between nodes
         for (const link of parsed.links){
             const sourceNode: Experiment_node = await get_node_by_name(link.source, experiment_id, connection);
             const targetNode: Experiment_node = await get_node_by_name(link.target, experiment_id, connection);
@@ -143,6 +181,10 @@ export async function save_config(
     }
 }
 
+/**
+ * Calculates the Cartesian product of an array of arrays.
+ * @param arrays An array of arrays, where each inner array is a record of string key-value pairs.
+ */
 export function cartesianProduct(arrays: Record<string, string>[][]): Record<string, string>[] {
     if (arrays.length === 0) return [];
 
@@ -213,6 +255,12 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
     }
 }
 
+/**
+ * Recursively resolves inputs for a node by checking its parents.
+ * If the node has no parents, it retrieves inputs directly from the dataset.
+ * If it has parents, it resolves inputs from each parent and combines them.
+ * @param node_id The ID of the node for which to resolve inputs.
+ */
 export async function resolve_inputs(node_id: number): Promise<PromptVarsDict[]> {
     const dataset_parents: number[] = await get_parents(node_id, 'dataset');
     const template_parents: number[] = await get_parents(node_id, 'prompt_template');

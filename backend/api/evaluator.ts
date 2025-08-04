@@ -11,6 +11,17 @@ type EvalOrProcessResponse = {
     error?: string;
 }
 
+/**
+ * Executes JavaScript code in a sandboxed environment.
+ * The code should define a function named `evaluate` or `process` depending on the process
+ * @param code - JavaScript code as a string or a function that takes a ResponseInfo object and returns a value.
+ * @param result - The result object containing the output result and ID.
+ * @param vars - A dictionary of prompt variables.
+ * @param metavars - A dictionary of metadata variables.
+ * @param llm_name - The name of the LLM used for processing.
+ * @param prompt - The prompt string used in the evaluation or processing.
+ * @param process_type - The type of process to execute, either "evaluator" or "processor".
+ */
 export async function executejs(
     code: string | ((rinfo: ResponseInfo) => any),
     result: Result,
@@ -77,7 +88,16 @@ export async function executejs(
 }
 
 
-
+/**
+ * Runs the provided process function over the response information.
+ * @param process_func - A function that takes a ResponseInfo object and returns a processed result.
+ * @param result - The result object containing the output result and ID.
+ * @param vars - A dictionary of prompt variables.
+ * @param metavars - A dictionary of metadata variables.
+ * @param llm_name - The name of the LLM used for processing.
+ * @param prompt - The prompt string used in the evaluation or processing.
+ * @param process_type - The type of process to execute, either "evaluator" or "processor".
+ */
 export async function run_over_response(
     process_func: (resp: ResponseInfo) => any,
     result: Result,

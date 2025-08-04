@@ -14,6 +14,10 @@ app.use(express.json());
 
 const upload = multer({ dest: 'uploads/' });
 
+/**
+ * Endpoint to upload a YAML configuration file and other files.
+ * It saves the configuration and returns the experiment name.
+ */
 app.post('/config', upload.any(), async (req, res) => {
     try {
         const yamlFile = req.files.find(f => f.fieldname === 'yaml');
@@ -35,6 +39,10 @@ app.post('/config', upload.any(), async (req, res) => {
     }
 });
 
+/**
+ * Endpoint to run an experiment by its names.
+ * The experiment must be already saved in the database.
+ */
 app.get('/run_experiment/:name', async (req, res) => {
     try{
         const experiment_name = req.params.name;
@@ -48,6 +56,9 @@ app.get('/run_experiment/:name', async (req, res) => {
     }
 })
 
+/**
+ * Endpoint to get the total token count for a specific experiment before running it.
+ */
 app.get('/total_tokens/:experiment_name', async (req, res) => {
     try{
         const experiment_name = req.params.experiment_name;
