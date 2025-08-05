@@ -126,7 +126,7 @@ export type ExperimentProcessor = {
   name: string;
 }
 
-export type db_credentials = {
+export type Db_credentials = {
   host: string;
   port?: number;
   user: string;

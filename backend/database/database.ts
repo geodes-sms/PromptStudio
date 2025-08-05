@@ -1,8 +1,6 @@
-// @ts-ignore
-import mysql from "mysql2/promise";
+import * as mysql from "mysql2/promise";
 import {
-  Dataset,
-  db_credentials,
+  Db_credentials,
   Evaluator,
   Experiment,
   Experiment_node,
@@ -19,21 +17,18 @@ import {
 } from "../api/types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 
-// @ts-ignore
-import fs from "fs";
+import * as fs from "fs";
 import {parse} from "csv-parse";
 
-// @ts-ignore
-import crypto from "crypto";
-// @ts-ignore
-import path from "node:path";
+import * as crypto from "crypto";
+import * as path from "node:path";
 
 const credentialsPath = path.join(process.cwd(), "../../credentials.json");
 const parsed = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-const db_credentials: db_credentials = parsed.database;
 
-export const pool = mysql.createPool({
+const db_credentials: Db_credentials = parsed.database;
+
+export const pool: mysql.Pool = mysql.createPool({
   host: db_credentials.host,
   user: db_credentials.user,
   password: db_credentials.password,
@@ -169,7 +164,7 @@ export async function save_experiment(experiment: Experiment, connection: mysql.
     const sql = "INSERT INTO Experiment(title, max_retry, threads) VALUES (?, ?, ?)";
     const values = [experiment.title, experiment.max_retry, experiment.threads];
     const [result] = await connection.execute(sql, values);
-    return result.insertId;
+    return (result as any).insertId;
   } catch (error) {
     console.error(error);
   }
