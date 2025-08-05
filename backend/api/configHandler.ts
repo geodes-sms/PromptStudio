@@ -1,5 +1,4 @@
-// @ts-ignore
-import fs from "fs";
+import * as fs from "fs";
 import {
     get_data_inputs_by_dataset,
     get_experiment_by_name,
@@ -23,12 +22,10 @@ import {
     save_promptconfig,
     save_template,
 } from "../database/database";
-// @ts-ignore
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import {Dataset, Evaluator, Experiment_node, Llm_params, ProcessorResult, Promptconfig, prompttemplate} from "./types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {get_marker_map} from "./utils";
-import {PromptPermutationGenerator} from "../template";
 import {getTokenCount} from "./token";
 import {PoolConnection} from "mysql2/promise";
 
@@ -240,8 +237,7 @@ export async function getTotalTokenCountForExperiment(experimentName: string): P
                 }
 
                 const markersDict = await get_marker_map(input);
-                const generator = new PromptPermutationGenerator(template.value);
-                const prompt = generator.generate(markersDict).next().value.toString();
+                const prompt = fillTemplate(template.value, markersDict);
 
                 const tokenCount = getTokenCount(model, prompt);
                 totalTokens += tokenCount * remainingIterations;
@@ -312,6 +308,19 @@ export async function resolve_inputs(node_id: number): Promise<PromptVarsDict[]>
         }
         resolved_per_parent.push(new_inputs);
     }
-    // Combine (Cartesian product by default)
+    // Combine
     return cartesianProduct(resolved_per_parent);
+}
+
+export function fillTemplate(
+    template: string,
+    vars: PromptVarsDict
+): string {
+    return template.replace(/\{([^}]+)}/g, (_, marker) => {
+        const entry = vars[marker];
+        if (entry == null || typeof entry !== "string") {
+            return `{${marker}}`;
+        }
+        return entry;
+    });
 }
