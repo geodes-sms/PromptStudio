@@ -228,7 +228,6 @@ export class PromptPipeline {
     undefined
   > {
     // Load any cache'd responses
-    // TODO Replace this with a database lookup (maybe ?)
     const responses = this._load_cached_responses();
 
     // Normalize the chat history var such that there's always at least one element.

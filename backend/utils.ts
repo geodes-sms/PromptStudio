@@ -384,9 +384,6 @@ export async function call_chatgpt(
       "Could not find an OpenAI API key. Double-check that your API key is set in Settings or in your local environment.",
     );
 
-  // TODO Remove this
-  BASE_URL = "https://mockgpt.wiremockapi.cloud/v1";
-
   const configuration = new OpenAIConfig({
     apiKey: API_KEY ?? OPENAI_API_KEY,
     basePath: BASE_URL ?? OPENAI_BASE_URL ?? undefined,
