@@ -9,7 +9,6 @@ import {
 import {Experiment, Experiment_node, Link, NodeType} from "./types";
 import {resolve_inputs} from "./configHandler";
 import {ExperimentRunner} from "./ExperimentRunner";
-import {Dict} from "../typing";
 import {EvaluatorRunner} from "./EvaluatorRunner";
 
 /**
@@ -21,7 +20,7 @@ import {EvaluatorRunner} from "./EvaluatorRunner";
  * @param api_keys A dictionary of API keys to use for the experiment.
  * @param experiment The experiment object containing details like title and threads.
  */
-async function run_template(node_id: number, api_keys: Dict<string>, experiment: Experiment) {
+async function run_template(node_id: number, api_keys: string, experiment: Experiment) {
     try{
         const inputs = await resolve_inputs(node_id);
         const configs = await get_configs_by_template_id(node_id);
@@ -94,7 +93,7 @@ async function run_processor(processor_id: number, experiment: Experiment){
  * @param experiment_name The name of the experiment to run.
  * @param api_keys A dictionary of API keys to use for the experiment.
  */
-export async function run_experiment(experiment_name: string, api_keys: Dict<string>) {
+export async function run_experiment(experiment_name: string, api_keys: string) {
     try{
         const experiment = await get_experiment_by_name(experiment_name);
         const nodes = await get_nodes_by_experiment(experiment.id);

@@ -3,7 +3,7 @@
 // from string import Template
 
 // from chainforge.promptengine.models import LLM
-import React from "react";
+import * as React from "react";
 import { LLM, LLMProvider, NativeLLM, getProvider } from "./models";
 import {
   Dict,
@@ -25,7 +25,6 @@ import {
   LLMSpec,
   EvaluationScore,
   LLMResponseData,
-  isImageResponseData,
   StringOrHash,
   PromptVarsDict,
   MultiModalContentAnthropic,
@@ -61,7 +60,6 @@ const ANTHROPIC_AI_PROMPT = "\n\nAssistant:";
 /** Where the ChainForge Flask server is being hosted, if any. */
 
 export const FLASK_BASE_URL =
-  // @ts-expect-error undefined
   //window.__CF_HOSTNAME !== undefined && window.__CF_PORT !== undefined
    // ? "/"
     "http://localhost:8000/";
@@ -1917,14 +1915,14 @@ function _extract_openai_completion_responses(response: Dict): Array<string> {
  * than 1 response (e.g., asking the LLM to generate multiple responses),
  * this produces a list of all returned responses.
  */
-function _extract_openai_image_responses(
+/*function _extract_openai_image_responses(
   response: Array<ImagesResponseDataInner>,
 ): LLMResponseData[] {
   return response.map((v) => ({
     t: "img",
     d: v.b64_json ?? v.url ?? "[[NO DATA]]",
   }));
-}
+}*/
 
 /**
  * Deduces the format of an OpenAI model response (completion or chat)
@@ -2044,11 +2042,11 @@ export function extract_responses(
   const llm_name = llm.toString().toLowerCase();
   switch (llm_provider) {
     case LLMProvider.OpenAI:
-      if (llm_name.startsWith("dall-e") || llm_name.startsWith("gpt-image"))
+/*      if (llm_name.startsWith("dall-e") || llm_name.startsWith("gpt-image"))
         return _extract_openai_image_responses(
           response as Array<ImagesResponseDataInner>,
-        );
-      else if (llm_name.includes("davinci") || llm_name.includes("instruct"))
+        );*/
+      if (llm_name.includes("davinci") || llm_name.includes("instruct"))
         return _extract_openai_completion_responses(response);
       else return _extract_chatgpt_responses(response);
     case LLMProvider.Azure_OpenAI:
@@ -2075,8 +2073,8 @@ export function extract_responses(
       if (
         Array.isArray(response) &&
         response.length > 0 &&
-        (typeof response[0] === "string" ||
-          (typeof response[0] === "object" && isImageResponseData(response[0])))
+        (typeof response[0] === "string"
+          )
       )
         return response as LLMResponseData[];
       else
@@ -2175,7 +2173,7 @@ export const extractSettingsVars = (vars?: PromptVarsDict) => {
   } else return {};
 };
 
-export const extractMediaVars = (vars?: PromptVarsDict) => {
+/*export const extractMediaVars = (vars?: PromptVarsDict) => {
   if (vars === undefined) return {};
 
   const media_vars: Dict<LLMResponseData[]> = {};
@@ -2194,7 +2192,7 @@ export const extractMediaVars = (vars?: PromptVarsDict) => {
   });
 
   return media_vars;
-};
+};*/
 
 export const areEqualLLMResponseData = (
   A: TemplateVarInfo | LLMResponseData | undefined,
@@ -2211,7 +2209,6 @@ export const areEqualLLMResponseData = (
     const keys_B = Object.keys(B);
     if (keys_A.length !== keys_B.length) return false;
     for (const k of keys_A) {
-      // @ts-expect-error TS doesn't know that k is a key of A/B
       if (!(k in B) || A[k] !== B[k]) return false;
     }
     return true;
@@ -2259,7 +2256,7 @@ export const areEqualVarsDicts = (
   if (keys_A.length !== keys_B.length) return false;
   else if (keys_A.length === 0) return true;
   const all_vars = new Set(keys_A.concat(keys_B));
-  for (const v of all_vars) {
+  for (const v of Array.from(all_vars)) {
     if (!(v in B) || !(v in A) || !areEqualPromptVarsDictValues(A[v], B[v]))
       return false;
   }
@@ -2292,7 +2289,7 @@ export const countNumLLMs = (
 export const setsAreEqual = (setA: Set<any>, setB: Set<any>): boolean => {
   if (setA.size !== setB.size) return false;
   const equal = true;
-  for (const item of setA) {
+  for (const item of Array.from(setA)) {
     if (!setB.has(item)) return false;
   }
   return equal;

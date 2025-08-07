@@ -2702,7 +2702,7 @@ export function typecastSettingsDict(
   useStore.getState().setAvailableLLMs([...AvailableLLMs]);
 };*/
 
-export const setCustomProviders = (providers: CustomLLMProviderSpec[]) => {
+/*export const setCustomProviders = (providers: CustomLLMProviderSpec[]) => {
   for (const p of providers)
     setCustomProvider(
       p.name,
@@ -2711,7 +2711,7 @@ export const setCustomProviders = (providers: CustomLLMProviderSpec[]) => {
       p.rate_limit,
       p.settings_schema,
     );
-};
+};*/
 
 export const getTemperatureSpecForModel = (modelName: string) => {
   if (modelName in ModelSettings) {

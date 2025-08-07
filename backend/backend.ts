@@ -1,56 +1,35 @@
-import MarkdownIt from "markdown-it";
-import axios from "axios";
-import JSZip from "jszip";
+import * as MarkdownIt from "markdown-it";
 import { v4 as uuid } from "uuid";
 import {
   Dict,
   LLMResponseError,
   RawLLMResponseObject,
   LLMResponse,
-  ChatHistoryInfo,
-  isEqualChatHistory,
   PromptVarsDict,
   QueryProgress,
-  EvaluationScore,
   LLMSpec,
   EvaluatedResponsesResults,
-  CustomLLMProviderSpec,
-  LLMResponseData,
   PromptVarType,
-  StringOrHash,
-  JSONCompatible,
 } from "./typing";
-import { LLM, LLMProvider, getEnumName, getProvider } from "./models";
+import { LLM, LLMProvider } from "./models";
 import {
-  APP_IS_RUNNING_LOCALLY,
   set_api_keys,
-  FLASK_BASE_URL,
-  call_flask_backend,
-  extractSettingsVars,
-  areEqualVarsDicts,
-  repairCachedResponses,
   deepcopy,
-  extendArray,
-  extendArrayDict,
-  extractMediaVars,
 } from "./utils";
 import { PromptPipeline } from "./query";
 import {
   PromptPermutationGenerator,
   PromptTemplate,
-  cleanEscapedBraces,
-  escapeBraces,
 } from "./template";
 import { UserForcedPrematureExit } from "./errors";
 import CancelTracker from "./canceler";
-import { execPy } from "./pyodide/exec-py";
 import { baseModelToProvider } from "./ModelSettingSchemas";
 
 // """ =================
 //     SETUP AND GLOBALS
 //     =================
 // """
-const DEFAULT_JSON_HEADERS = {
+/*const DEFAULT_JSON_HEADERS = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
 };
@@ -65,7 +44,7 @@ enum MetricType {
   Mixed = 6,
   Unknown = 7,
   Empty = 8,
-}
+}*/
 
 // """ ==============
 //     UTIL FUNCTIONS
@@ -175,7 +154,7 @@ function to_standard_format(r: RawLLMResponseObject | Dict): LLMResponse {
   if ("chat_history" in r) resp_obj.chat_history = r.chat_history;
   return resp_obj;
 }
-// eslint-disable-next-line
+/*// eslint-disable-next-line
 async function setAPIKeys(api_keys: Dict<string>): Promise<void> {
   if (api_keys !== undefined) set_api_keys(api_keys);
 }
@@ -214,11 +193,12 @@ function filterVarsByLLM(vars: PromptVarsDict, llm_key: string): Dict {
     );
   });
   return _vars;
-}
+}*/
 
 /**
  * Test equality akin to Python's list equality.
  */
+/*
 function isLooselyEqual(value1: any, value2: any): boolean {
   // If both values are non-array types, compare them directly
   if (!Array.isArray(value1) && !Array.isArray(value2)) {
@@ -250,8 +230,9 @@ function isLooselyEqual(value1: any, value2: any): boolean {
 function areSetsEqual(xs: Set<any>, ys: Set<any>): boolean {
   return xs.size === ys.size && [...xs].every((x) => ys.has(x));
 }
+*/
 
-function allStringsAreNumeric(strs: Array<string>) {
+/*function allStringsAreNumeric(strs: Array<string>) {
   return strs.every((s) => !isNaN(parseFloat(s)));
 }
 
@@ -321,9 +302,9 @@ function check_typeof_vals(arr: Array<any>): MetricType {
     // If we're here, all checks passed, and we return the more specific KeyValue type:
     return first_dict_val_type;
   } else return val_type;
-}
+}*/
 
-async function run_over_responses(
+/*async function run_over_responses(
     process_func: (resp: ResponseInfo) => any,
     responses: LLMResponse[],
     process_type: "evaluator" | "processor",
@@ -409,7 +390,7 @@ async function run_over_responses(
   );
 
   return await Promise.all(evald_resps);
-}
+}*/
 
 // """ ===================
 //     BACKEND FUNCTIONS
@@ -422,7 +403,7 @@ async function run_over_responses(
  * @param vars a dict of the template variables to fill the prompt template with, by name. (See countQueries docstring for more info).
  * @returns An array of strings representing the prompts that will be sent out. Note that this could include unfilled template vars.
  */
-export async function generatePrompts(
+/*export async function generatePrompts(
   root_prompt: string,
   vars: Dict<PromptVarType[]>,
 ): Promise<PromptTemplate[]> {
@@ -431,7 +412,7 @@ export async function generatePrompts(
     gen_prompts.generate(deepcopy(vars)),
   );
   return all_prompt_permutations;
-}
+}*/
 
 interface LLMPrompterResults {
   llm_key: string;
@@ -666,7 +647,7 @@ export async function queryLLM(
  * @param apiKeys Any API keys to use (if needed).
  * @returns
  */
-export async function simpleQueryLLM(
+/*export async function simpleQueryLLM(
   prompt: string,
   llm: string | string[] | LLMSpec[],
   system_msg?: string,
@@ -697,7 +678,7 @@ export async function simpleQueryLLM(
     apiKeys, // API keys (if any)
     true, // no_cache mode on
   );
-}
+}*/
 
 /**
  * Executes a Javascript 'evaluate' function over all cache'd responses with given id's.
@@ -714,7 +695,7 @@ export async function simpleQueryLLM(
  * @param process_type the type of processing to perform. Evaluators only 'score'/annotate responses with an 'eval_res' key. Processors change responses (e.g. text).
  */
 
-export async function executejs(
+/*export async function executejs(
   id: string,
   code: string | ((rinfo: ResponseInfo) => any),
   responses: LLMResponse[],
@@ -730,7 +711,7 @@ export async function executejs(
   let process_func: any;
   if (typeof code === "string") {
     try {
-      /*
+      /!*
         To run Javascript code in a psuedo-'sandbox' environment, we
         can use an iframe and run eval() inside the iframe, instead of the current environment.
         This is slightly safer than using eval() directly, doesn't clog our namespace, and keeps
@@ -738,7 +719,7 @@ export async function executejs(
         
         The Evaluate node in the front-end has a hidden iframe with the following id. 
         We need to get this iframe element. 
-      */
+      *!/
       iframe = document.getElementById(`${id}-iframe`);
       if (!iframe)
         throw new Error("Could not find iframe sandbox for evaluator node.");
@@ -801,7 +782,7 @@ export async function executejs(
   }
 
   return { responses: processed_resps, logs: all_logs };
-}
+}*/
 
 /**
  * Executes a Python 'evaluate' function over all cache'd responses with given id's.

@@ -1,7 +1,6 @@
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {NodeType, ProcessorResult, Result} from "./types";
-// @ts-ignore
-import workerpool from "workerpool";
+import * as workerpool from "workerpool";
 import {
     get_config, get_evaluation_result,
     get_input_by_id,
@@ -25,6 +24,7 @@ type EvaluationTask = {
     markersDict: PromptVarsDict;
     template_value: string;
     result: Result;
+    input_id: number;
 }
 
 /**
@@ -35,7 +35,7 @@ export class EvaluatorRunner {
     private taskQueue: EvaluationTask[] = [];
     private isProducing = true;
     private errors = 0;
-    private pool: workerpool.WorkerPool;
+    private pool: workerpool.Pool;
     constructor(
         private experiment_name: string,
         private num_workers: number,
@@ -98,7 +98,7 @@ export class EvaluatorRunner {
 
                     input_id = input.id;
                     const markersDict = await get_marker_map(input);
-                    const marker = link[0].source_var;
+                    const marker = link.source_var;
                     const prompt = markersDict[marker];
                     // Check in processor_result if the input is already processed
                     const result = await get_processor_result_by_input_id(input.id, this.node_id);
@@ -118,7 +118,8 @@ export class EvaluatorRunner {
                             input_id: undefined,
                             start_time: undefined,
                             end_time: undefined
-                        }
+                        },
+                        input_id: input_id,
                     }
                     this.taskQueue.push(task);
                 }
@@ -158,6 +159,7 @@ export class EvaluatorRunner {
                         markersDict: markersDict,
                         template_value: template_value,
                         result: result,
+                        input_id: null
                     }
                     this.taskQueue.push(task);
                 }
@@ -196,6 +198,7 @@ export class EvaluatorRunner {
                         markersDict: markersDict,
                         template_value: template.value,
                         result: updated_result,
+                        input_id: processor_result.input_id,
                     }
                     this.taskQueue.push(task);
                 }
@@ -244,8 +247,8 @@ export class EvaluatorRunner {
             if (!task) continue;
 
             try {
-                const {evaluator_id, llm_spec, markersDict, template_value, result} = task;
-                await this.pool.exec('process', [evaluator_id, llm_spec, markersDict, template_value, result]);
+                const {evaluator_id, llm_spec, markersDict, template_value, result, input_id} = task;
+                await this.pool.exec('process', [evaluator_id, llm_spec, markersDict, template_value, result, input_id]);
             } catch (error) {
                 console.error(`Error processing task: ${error.message}`);
                 this.errors++;

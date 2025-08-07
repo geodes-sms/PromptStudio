@@ -1,6 +1,5 @@
 import {Dict, LLMSpec, PromptVarsDict} from "../typing";
-// @ts-ignore
-import workerpool from "workerpool";
+import * as workerpool from "workerpool";
 import {
     get_config,
     get_experiment_by_name,
@@ -13,6 +12,7 @@ import {
 } from "../database/database";
 import { create_llm_spec, get_marker_map } from "./utils";
 import { Promptconfig } from "./types";
+import {queryLLM} from "../backend";
 
 export type Task = {
     config_id: number;
@@ -33,7 +33,7 @@ export class ExperimentRunner {
     private failedQueue: Map<number, Task[]> = new Map();
     private isProducing = true;
     private errors = 0;
-    private pool: workerpool.WorkerPool;
+    private pool: workerpool.Pool;
 
     /**
      * Constructor for the ExperimentRunner class.
@@ -46,7 +46,7 @@ export class ExperimentRunner {
         private experiment_name: string,
         private num_workers: number,
         private configs: Promptconfig[],
-        private api_keys: Dict<string>
+        private api_keys: string
     ) {
         this.pool = workerpool.pool(__dirname + '/worker.ts', {
             minWorkers: this.num_workers,
@@ -173,7 +173,7 @@ export class ExperimentRunner {
             task.markersDict,
             task.input_id,
             this.api_keys,
-            task.tries
+            task.tries,
         ]);
 
         if (!result.success && result.tries <= experimentMaxRetry) {

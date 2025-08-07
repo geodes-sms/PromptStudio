@@ -46,7 +46,7 @@ app.post('/config', upload.any(), async (req, res) => {
 app.get('/run_experiment/:name', async (req, res) => {
     try{
         const experiment_name = req.params.name;
-        const api_keys = req.query.api_keys as Dict<string>;
+        const api_keys = req.query.api_keys as string;
         await run_experiment(experiment_name, api_keys);
         res.status(200).json({ message: `Experiment ${experiment_name} started.` });
     }

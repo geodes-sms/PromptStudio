@@ -1,12 +1,11 @@
-// @ts-ignore
-import workerpool from 'workerpool';
+import * as workerpool from 'workerpool';
 import {queryLLM} from "../backend";
 import {
     get_evaluator_by_id, get_processor_by_id,
     save_error, save_error_evaluator, save_error_processor, save_eval_result, save_process_result,
     save_response
 } from "../database/database";
-import {Dict, LLMSpec, PromptVarsDict} from "../typing";
+import { LLMSpec, PromptVarsDict} from "../typing";
 import {executejs} from "./evaluator";
 import {ExperimentProcessor, Result} from "./types";
 
@@ -24,9 +23,11 @@ import {ExperimentProcessor, Result} from "./types";
  */
 async function processExperiment(config_id: number, llm_spec: LLMSpec, iterations: number,
                                  template_value: string, markersDict: PromptVarsDict,
-                                 input_id: number, api_keys: Dict<string>, tries: number = 0 ): Promise<{success: boolean, tries: number}> {
-    // @ts-ignore
-    const safe_api_keys = JSON.parse(api_keys);
+                                 input_id: number, api_keys: string, tries: number = 0 ): Promise<{success: boolean, tries: number}> {
+    let safe_api_keys = {};
+    if (api_keys){
+        safe_api_keys = JSON.parse(api_keys);
+    }
     const start_time = new Date().toISOString().replace('T', ' ').replace('Z', ' ');
     const responses = await queryLLM(
         config_id.toString(),
@@ -86,28 +87,30 @@ async function evaluate(evaluator_id: number, LLMSpec: LLMSpec, markersDict: Pro
  * Processes a result using the specified processor.
  * This function executes the processor's code and saves the processed result or error.
  * It is designed to be run in a worker thread, allowing for parallel processing.
+ * Result or input_id can be null, input_id is used if we want to process a dataset directly which means we wouldn't have a result
+ * If we process results we then only have result and no input_id
  * @param processor_id The ID of the processor to use for processing the result.
  * @param LLMSpec The specification of the LLM to use for processing.
  * @param markersDict A dictionary of markers to use in the processing.
  * @param template_value The template value to use for the processing.
  * @param result The result to process, which contains the response from the LLM.
- * @param input_id The ID of the input to use for the processing, used for saving results and errors.
+ * @param input_id
  */
-async function process(processor_id: number, LLMSpec: LLMSpec,  markersDict: PromptVarsDict, template_value: string, result: Result, input_id: number) {
+async function process(processor_id: number, LLMSpec: LLMSpec,  markersDict: PromptVarsDict, template_value: string, result: Result, input_id: number = null) {
     const processor: ExperimentProcessor = await get_processor_by_id(processor_id);
-    const process_result = await executejs(processor.code, result, markersDict, {}, LLMSpec.base_model, template_value, "processor");
+    const process_result = await executejs(processor.code, result, markersDict, {}, LLMSpec?.base_model || null, template_value, "processor");
     // Check if there is an error in the processor itself
     if (process_result.error) {
-        await save_error_processor(processor.node_id, process_result.error, result.id, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
+        await save_error_processor(processor.node_id, process_result.error, result.id || null, input_id || null, new Date().toISOString().replace('T', ' ').replace('Z', ' '),);
         return;
     }
     // Check if there is an error in the process result
     if (process_result.response.error) {
-        await save_error_processor(processor.node_id, process_result.response.error, process_result.response.result_id, input_id, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
+        await save_error_processor(processor.node_id, process_result.response.error, process_result.response.result_id || null, input_id || null, new Date().toISOString().replace('T', ' ').replace('Z', ' '));
     } else {
-        const result = process_result.response.result;
-        if (result) {
-            await save_process_result(result, process_result.response.result_id, processor.node_id, input_id);
+        const process_result_string = process_result.response.result;
+        if (process_result_string) {
+            await save_process_result(process_result_string, process_result.response.result_id || null, processor.node_id, input_id);
         }
     }
 }

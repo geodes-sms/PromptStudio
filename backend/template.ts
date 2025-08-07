@@ -7,7 +7,6 @@ import {
   StringOrHash,
   TemplateVarInfo,
 } from "./typing";
-import { llmResponseDataToString } from "./utils";
 
 /**
  * Given a template string, returns a generator that yields the template variables
@@ -108,7 +107,7 @@ export function containsSameTemplateVariables(s1: string, s2: string): boolean {
  * @param str The string to transform
  */
 export function cleanEscapedBraces(str: string): string {
-  return str.replaceAll("\\{", "{").replaceAll("\\}", "}");
+  return str.replace("\\{", "{").replace("\\}", "}");
 }
 
 export class StringTemplate {
@@ -148,6 +147,7 @@ export class StringTemplate {
    *   - has at least one varname in passed varnames
    */
   has_vars(varnames?: Array<string>): boolean {
+    // @ts-ignore
     for (const v of extractTemplateVars(this.val))
       if (varnames === undefined || varnames.includes(v)) return true;
     return false;
@@ -161,6 +161,7 @@ export class StringTemplate {
    */
   get_vars(): Array<string> {
     const varnames: Array<string> = [];
+    // @ts-ignore
     for (const v of extractTemplateVars(this.val)) varnames.push(v);
     return varnames;
   }
@@ -293,15 +294,16 @@ export class PromptTemplate {
           obj.text !== undefined &&
           (typeof obj.text === "string" || typeof obj.text === "number")
         ) {
+          // @ts-ignore
           newParamDict[param] = obj.text as StringOrHash;
-        } else if (obj.image !== undefined && typeof obj.image === "string") {
+        }/* else if (obj.image !== undefined && typeof obj.image === "string") {
           // This is a special case for images.
           image_params.push(param);
           newParamDict[param] = {
             t: "img",
             d: obj.image,
           };
-        }
+        }*/
       });
       paramDict = newParamDict;
     }
@@ -403,9 +405,8 @@ export class PromptTemplate {
       this.template = new StringTemplate(this.template).safe_substitute(
         StringLookup.concretizeDict(special_vars_to_fill),
       );
-  }
+  }*/
 
- */
 }
 
 export class PromptPermutationGenerator {
@@ -476,10 +477,10 @@ export class PromptPermutationGenerator {
             )) {
               for (
                 let i = 0;
-                i < (paramDict[other_param] as PromptVarType[]).length;
+                i < (paramDict[other_param] as unknown as PromptVarType[]).length;
                 i++
               ) {
-                const ov = (paramDict[other_param] as PromptVarType[])[i];
+                const ov = (paramDict[other_param] as unknown as PromptVarType[])[i];
                 if (
                   isDict(ov) &&
                   (ov as TemplateVarInfo).associate_id === v_associate_id
@@ -499,6 +500,7 @@ export class PromptPermutationGenerator {
     } else if (typeof val === "string" || typeof val === "number") {
       const sub_dict: Dict<StringOrHash> = {};
       sub_dict[param] = val;
+      // @ts-ignore
       new_prompt_temps = [template.fill(sub_dict)];
     } else
       throw new Error(
@@ -512,6 +514,7 @@ export class PromptPermutationGenerator {
     } else {
       for (let i = 0; i < new_prompt_temps.length; i++) {
         const p = new_prompt_temps[i];
+        // @ts-ignore
         yield* this._gen_perm(p, params_left, paramDict);
       }
     }
@@ -532,6 +535,7 @@ export class PromptPermutationGenerator {
       return true; // done
     }
 
+    // @ts-ignore
     for (const p of this._gen_perm(
       template,
       Object.keys(paramDict),

@@ -36,11 +36,11 @@ export type LLMResponseData = string;
     }
   | StringOrHash;*/
 
-export function isImageResponseData(
+/*export function isImageResponseData(
   r: LLMResponseData,
 ): r is { t: "img"; d: string } {
   return typeof r === "object" && r.t === "img" && typeof r.d === "string";
-}
+}*/
 
 // Function types
 export type Func<T = void> = (...args: any[]) => T;

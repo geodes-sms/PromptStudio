@@ -23,7 +23,7 @@ import {parse} from "csv-parse";
 import * as crypto from "crypto";
 import * as path from "node:path";
 
-const credentialsPath = path.join(process.cwd(), "../../credentials.json");
+export const credentialsPath = path.join(__dirname, '../../credentials.json');
 const parsed = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
 
 const db_credentials: Db_credentials = parsed.database;
@@ -565,22 +565,6 @@ function computeMarkerValueHash(marker_id: number, value: string): string {
       .digest("hex");
 }
 
-export async function save_sub_template(
-    template_id: number,
-    sub_template_id: number,
-    var_name: string,
-    connection: mysql.Connection | mysql.Pool = pool
-): Promise<number> {
-    try {
-        const sql = 'INSERT INTO sub_template(main_template_id, sub_template_id, var_name) VALUES (?, ?, ?)';
-        const values = [template_id, sub_template_id, var_name];
-        const [result] = await connection.execute(sql, values);
-        return (result as any).insertId;
-    } catch (error) {
-        console.error(error);
-    }
-}
-
 export async function get_results_by_template(template_id: string): Promise<Result[]> {
   try {
     const sql = `
@@ -876,7 +860,7 @@ export async function get_target_var(source_id: number, target_id: number, sourc
 
 export async function get_processor_results_by_id(processor_id: number){
   try{
-    const sql = 'SELECT * FROM processor_result WHERE processor_id = ?';
+    const sql = 'SELECT * FROM processorresult WHERE processor_id = ?';
     const [rows] = await pool.execute(sql, [processor_id]);
     return rows as ProcessorResult[];
   }
@@ -927,7 +911,7 @@ export async function get_evaluator_by_id(evaluator_id: number){
 
 export async function get_results_by_processor(processor_id: number){
   try{
-    const sql = 'SELECT * FROM processor_result WHERE processor_id = ?';
+    const sql = 'SELECT * FROM processorresult WHERE processor_id = ?';
     const [rows] = await pool.execute(sql, [processor_id]);
     return rows as ProcessorResult[];
   }
@@ -967,7 +951,7 @@ export async function get_processor_by_id(processor_id: number){
 
 export async function save_error_processor(processor_id: number, error_message: string, result_id: number, input_id: number, timestamp: string){
   try{
-    const sql = 'INSERT INTO error_processor(processor_id, error_message, result_id, input_id, timestamp) VALUES (?, ?, ?, ?, ?)';
+    const sql = 'INSERT INTO processor_error(processor_id, error_message, result_id, input_id, timestamp) VALUES (?, ?, ?, ?, ?)';
     const values = [processor_id, error_message, result_id, input_id, timestamp];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
@@ -979,7 +963,7 @@ export async function save_error_processor(processor_id: number, error_message: 
 
 export async function save_process_result(processor_result: string, result_id: number, processor_id: number, input_id: number){
   try{
-    const sql = 'INSERT INTO processor_result(processor_result, result_id, processor_id, input_id) VALUES (?, ?, ?, ?)';
+    const sql = 'INSERT INTO processorresult(processor_result, result_id, processor_id, input_id) VALUES (?, ?, ?, ?)';
     const values = [processor_result, result_id, processor_id, input_id];
     const [result] = await pool.execute(sql, values);
     return (result as any).insertId;
@@ -991,7 +975,7 @@ export async function save_process_result(processor_result: string, result_id: n
 
 export async function get_processor_result_by_input_id(input_id: number, processor_id: number){
     try {
-        const sql = 'SELECT * FROM processor_result WHERE input_id = ? AND processor_id = ?';
+        const sql = 'SELECT * FROM processorresult WHERE input_id = ? AND processor_id = ?';
         const [rows] = await pool.execute(sql, [input_id, processor_id]);
         if ((rows as any[]).length > 0) {
         return (rows as ProcessorResult[])[0];
@@ -1004,7 +988,7 @@ export async function get_processor_result_by_input_id(input_id: number, process
 
 export async function get_processor_result_by_result_id(result_id: number, processor_id: number){
     try {
-        const sql = 'SELECT * FROM processor_result WHERE result_id = ? AND processor_id = ?';
+        const sql = 'SELECT * FROM processorresult WHERE result_id = ? AND processor_id = ?';
         const [rows] = await pool.execute(sql, [result_id, processor_id]);
         if ((rows as any[]).length > 0) {
             return (rows as ProcessorResult[])[0];

@@ -98,7 +98,7 @@ CREATE TABLE Marker(
     marker varchar(255) NOT NULL,
     dataset_id INT UNSIGNED NOT NULL,
     CONSTRAINT PK_Marker PRIMARY KEY (id),
-    CONSTRAINT FK_template_id_marker FOREIGN KEY (dataset_id) REFERENCES dataset(node_id)
+    CONSTRAINT FK_dataset_id_marker FOREIGN KEY (dataset_id) REFERENCES dataset(node_id)
 );
 
 CREATE TABLE Marker_value(
@@ -179,13 +179,6 @@ CREATE TABLE Error(
     CONSTRAINT PK_Error PRIMARY KEY (id),
     CONSTRAINT FK_config_id_error FOREIGN KEY (config_id) REFERENCES PromptConfig(id),
     CONSTRAINT FK_input_id_error FOREIGN KEY (input_id) REFERENCES Data_Input(id)
-);
-
-CREATE TABLE Template_dependency_progress(
-    template_id INT UNSIGNED NOT NULL PRIMARY KEY,
-    last_seen_result_id INT UNSIGNED NOT NULL,
-    CONSTRAINT FK_template_id_progress FOREIGN KEY (template_id) REFERENCES PromptTemplate(node_id),
-    CONSTRAINT FK_last_seen_result_id FOREIGN KEY (last_seen_result_id) REFERENCES Result(id)
 );
 
 CREATE TABLE Processor(

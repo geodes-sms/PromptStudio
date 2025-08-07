@@ -1,10 +1,9 @@
 import axios from "axios";
-// @ts-ignore
-import FormData from 'form-data';
-// @ts-ignore
-import fs from 'fs';
-// @ts-ignore
-import yaml from "js-yaml";
+
+import * as FormData from 'form-data';
+
+import * as fs from 'fs';
+import * as yaml from "js-yaml";
 import * as path from "node:path";
 import Dict = NodeJS.Dict;
 

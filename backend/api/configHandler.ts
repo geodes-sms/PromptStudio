@@ -5,7 +5,7 @@ import {
     get_last_input_id,
     get_llm_by_base_model,
     get_llm_by_id,
-    get_next_input,
+    get_next_input, get_node_by_id,
     get_node_by_name, get_parents, get_processor_results_by_id,
     get_prompt_config_by_experiment,
     get_results,
@@ -23,7 +23,16 @@ import {
     save_template,
 } from "../database/database";
 import * as yaml from "js-yaml";
-import {Dataset, Evaluator, Experiment_node, Llm_params, ProcessorResult, Promptconfig, prompttemplate} from "./types";
+import {
+    Dataset,
+    Evaluator,
+    Experiment_node,
+    Llm_params,
+    NodeType,
+    ProcessorResult,
+    Promptconfig,
+    prompttemplate
+} from "./types";
 import {LLMSpec, PromptVarsDict} from "../typing";
 import {get_marker_map} from "./utils";
 import {getTokenCount} from "./token";
@@ -272,23 +281,31 @@ export async function resolve_inputs(node_id: number): Promise<PromptVarsDict[]>
 
     for (const parent_id of dataset_parents) {
         const parent_inputs = await resolve_inputs(parent_id);
-        const new_inputs: PromptVarsDict[] = [];
-        for (const input of parent_inputs){
+        const mapped_inputs: PromptVarsDict[] = [];
+
+        for (const input of parent_inputs) {
             const dict: PromptVarsDict = {};
             for (const marker of Object.keys(input)) {
-                const value = input[marker];
                 const target_var = await get_target_var(parent_id, node_id, marker);
-                dict[target_var] = value;
+                if(target_var !== undefined) {
+                    dict[target_var] = input[marker];
+                }
+                else{
+                    dict[marker] = input[marker];
+                }
             }
-            new_inputs.push(dict);
+            mapped_inputs.push(dict);
         }
-        resolved_per_parent.push(new_inputs);
+        resolved_per_parent.push(mapped_inputs);
     }
 
     for (const parent_id of template_parents){
         const results = await get_results_by_template(parent_id.toString());
         const new_inputs: PromptVarsDict[] = [];
         const target_var = await get_target_var(parent_id, node_id, 'prompt');
+        if (target_var === null || target_var === undefined) {
+            continue;
+        }
         for (const result of results) {
             const dict: PromptVarsDict = {};
             dict[target_var] = result.output_result;
@@ -307,6 +324,12 @@ export async function resolve_inputs(node_id: number): Promise<PromptVarsDict[]>
             new_inputs.push(dict);
         }
         resolved_per_parent.push(new_inputs);
+    }
+
+    const current_node = await get_node_by_id(node_id);
+    if (current_node.type === NodeType.dataset) {
+        const inputs = await get_data_inputs_by_dataset(node_id);
+        resolved_per_parent.push(inputs);
     }
     // Combine
     return cartesianProduct(resolved_per_parent);

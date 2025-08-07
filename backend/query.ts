@@ -10,7 +10,6 @@ import {
   isEqualChatHistory,
   ChatHistoryInfo,
   ModelSettingsDict,
-  isImageResponseData,
   LLMResponseData,
 } from "./typing";
 import {
@@ -23,7 +22,6 @@ import {
   areEqualVarsDicts,
   repairCachedResponses,
   compressBase64Image,
-  extractMediaVars,
 } from "./utils";
 import { UserForcedPrematureExit } from "./errors";
 import { typecastSettingsDict } from "./ModelSettingSchemas";
@@ -71,6 +69,7 @@ export class PromptPipeline {
 
   *gen_prompts(vars: Dict): Generator<PromptTemplate, boolean, undefined> {
     const prompt_perm_gen = new PromptPermutationGenerator(this._template);
+    // @ts-ignore
     yield* prompt_perm_gen.generate(vars);
     return true;
   }
@@ -93,7 +92,9 @@ export class PromptPipeline {
     // Check for selective failure
     if (!query && response instanceof LLMResponseError)
       return response; // yield the LLMResponseException
-    else if (response === undefined) return new LLMResponseError("Unknown");
+    else if (response === undefined) { // @ts-ignore
+      return new LLMResponseError("Unknown");
+    }
 
     // Each prompt has a history of what was filled in from its base template.
     // This data --like, "class", "language", "library" etc --can be useful when parsing responses.
@@ -103,51 +104,15 @@ export class PromptPipeline {
     // Extract and format the responses into `LLMResponseData`
     const extracted_resps = extract_responses(response, llm, provider);
 
-    // Detect any images and:
-    // - Downrez them if the user has approved of automatic compression.
-    // - Intern them to the MediaLookup table.
-    //   This saves a lot of performance and storage.
-    const contains_imgs = extracted_resps.some(isImageResponseData);
-    if (contains_imgs) {
-      for (const r of extracted_resps) {
-        if (isImageResponseData(r)) {
-          // At this point, we have a base64 image string.
-          let img_data: string = r.d;
-
-          // Compress the image if the user has approved of it.
-          if (this._imgCompr) {
-            try {
-              // Compress asynchronously, then convert back to base64
-              img_data = await compressBase64Image(r.d);
-              // DEBUG: Calculate compression ratio
-              // console.warn(`Compressed image to ${(b64_comp.length / r.d.length) * 100}% of original b64 size`);
-            } catch (e) {
-              // If compression fails, we just move on.
-              console.warn("Image compression attempt failed. Error info:", e);
-            }
-          }
-
-          // Intern the image to the MediaLookup table
-/*          const uid = await MediaLookup.uploadDataURL(
-            `data:image/png;base64,${img_data}`,
-          );
-          if (uid) {
-            r.d = uid; // Update the image data to the media UID, rather than the raw data.
-          } else {
-            console.warn("Failed to upload image to MediaLookup table.");
-            // Backup plan... may lead to unexpected behavior.
-            r.d = `data:image/png;base64,${r.d}`;
-          }*/
-        }
-      }
-    }
-
     // Create a response obj to represent the response
+
     let resp_obj: RawLLMResponseObject = {
       prompt: prompt.toString(),
       uid: uuid(),
       responses: extracted_resps,
+      // @ts-ignore
       llm,
+      // @ts-ignore
       tokens: response.usage,
       vars: mergeDicts(info, chat_history?.fill_history) ?? {},
       metavars: mergeDicts(metavars, chat_history?.metavars) ?? {},
@@ -244,6 +209,7 @@ export class PromptPipeline {
     > = [];
 
     // Generate concrete prompts one by one. Yield response from the cache or make async call to LLM.
+    // @ts-ignore
     for (const prompt of this.gen_prompts(vars)) {
       let prompt_str = prompt.toString();
       const info = prompt.fill_history;
@@ -253,18 +219,17 @@ export class PromptPipeline {
       // These must be extracted and, below, passed as 'llm_params'. Note that the name of the param
       // *has to be correct* and match the param name, for this to work.
       const settings_params = extractSettingsVars(info);
-      const media_params = extractMediaVars(info);
 
       // Loop over any present chat histories. (If none, will have a single pass with 'undefined' as chat_history value.)
       for (const chat_history of _chat_histories) {
         // If there's chat history, we need to fill any special (#) vars from the carried chat_history vars and metavars:
-        if (chat_history !== undefined) {
+/*        if (chat_history !== undefined) {
           prompt.fill_special_vars({
             ...chat_history?.fill_history,
             ...chat_history?.metavars,
           });
           prompt_str = prompt.toString();
-        }
+        }*/
 
         if (!prompt.is_concrete())
           throw new Error(
@@ -315,6 +280,7 @@ export class PromptPipeline {
             prompt: cached_resp.prompt,
             uid: cached_resp.uid ?? uuid(),
             responses: extracted_resps.slice(0, n),
+            // @ts-ignore
             llm: cached_resp.llm || NativeLLM.OpenAI_ChatGPT,
             // We want to use the new info, since 'vars' could have changed even though
             // the prompt text is the same (e.g., "this is a tool -> this is a {x} where x='tool'")
@@ -369,8 +335,7 @@ export class PromptPipeline {
     [key: string]: RawLLMResponseObject | RawLLMResponseObject[];
   } {
     if (this._storageKey === undefined) return {};
-    const data: Record<string, RawLLMResponseObject | RawLLMResponseObject[]> =
-      StorageCache.get(this._storageKey) ?? {};
+    const data: Record<string, RawLLMResponseObject | RawLLMResponseObject[]> = {};
 
     // Before retuning, verify data integrity: check that uids are present for all responses.
     return repairCachedResponses(data, this._storageKey);
@@ -380,9 +345,9 @@ export class PromptPipeline {
    * Stores the JSON responses to the local cache.
    * (Overrides the existing responses stored in the cache.)
    */
-  _cache_responses(responses: Dict): void {
+  _cache_responses(responses: Dict): void {/*
     if (this._storageKey !== undefined)
-      StorageCache.store(this._storageKey, responses);
+      StorageCache.store(this._storageKey, responses);*/
   }
 
   async _prompt_llm(
