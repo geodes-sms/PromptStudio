@@ -9,6 +9,7 @@ import {save_response} from "../backend/database/database";
 
 jest.setTimeout(20000);
 
+// To run those tests we need to run api.ts and have a working database
 describe("run_experiment", () => {
 
 
