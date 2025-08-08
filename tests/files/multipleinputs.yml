@@ -1,0 +1,98 @@
+experiment:
+  title: multipleinputs
+  max_retry: 0
+  threads: 1
+nodes:
+  - template:
+      name: prompt-1754659205422
+      value: >-
+        what is being tested here ? : {question} {expected} {processed} {animal}
+        {prompt}
+      iterations: 2
+      llms:
+        - key: 02e71758-fbac-40d6-98b5-f2ecb661a2bb
+          name: GPT3.5
+          model: gpt-3.5-turbo
+          emoji: "\U0001F916"
+          base_model: gpt-3.5-turbo
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+  - dataset:
+      name: textfields-1754659205422
+      path: files/textfields-1754659205422.csv
+  - dataset:
+      name: table-65d76f72-f49c-4457-ac34-e7dcf3ac1b2e
+      path: files/table-65d76f72-f49c-4457-ac34-e7dcf3ac1b2e.csv
+  - dataset:
+      name: csvNode-837df59b-1516-4a74-abfe-7cd807cc4958
+      path: files/csvNode-837df59b-1516-4a74-abfe-7cd807cc4958.csv
+  - processor:
+      type: javascript
+      name: process-fcaa8c7e-8e0e-438c-96a2-77b88937267f
+      file: files/process-fcaa8c7e-8e0e-438c-96a2-77b88937267f.js
+  - dataset:
+      name: textFieldsNode-f6f9a102-fcc2-46e1-8bcc-75d12137aedd
+      path: files/textFieldsNode-f6f9a102-fcc2-46e1-8bcc-75d12137aedd.csv
+  - template:
+      name: promptNode-dce1a1a7-7644-4dfc-ad8c-667721fd7e9e
+      value: '{test}'
+      iterations: 2
+      llms:
+        - key: 20369c3d-c2be-4050-a4a9-d8f26be9beca
+          name: GPT-4o
+          model: gpt-4o
+          emoji: "\U0001F916"
+          base_model: gpt-4
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+links:
+  - source: textfields-1754659205422
+    target: process-fcaa8c7e-8e0e-438c-96a2-77b88937267f
+    source_var: output
+    target_var: responseBatch
+  - source: table-65d76f72-f49c-4457-ac34-e7dcf3ac1b2e
+    target: prompt-1754659205422
+    source_var: Question
+    target_var: question
+  - source: table-65d76f72-f49c-4457-ac34-e7dcf3ac1b2e
+    target: prompt-1754659205422
+    source_var: Expected
+    target_var: expected
+  - source: process-fcaa8c7e-8e0e-438c-96a2-77b88937267f
+    target: prompt-1754659205422
+    source_var: output
+    target_var: processed
+  - source: csvNode-837df59b-1516-4a74-abfe-7cd807cc4958
+    target: prompt-1754659205422
+    source_var: output
+    target_var: animal
+  - source: promptNode-dce1a1a7-7644-4dfc-ad8c-667721fd7e9e
+    target: prompt-1754659205422
+    source_var: prompt
+    target_var: prompt
+  - source: textFieldsNode-f6f9a102-fcc2-46e1-8bcc-75d12137aedd
+    target: promptNode-dce1a1a7-7644-4dfc-ad8c-667721fd7e9e
+    source_var: output
+    target_var: test

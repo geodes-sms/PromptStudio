@@ -65,4 +65,18 @@ describe("run_experiment", () => {
         await run_experiment(experiment_name, '');
     })
 
+    it("chain of prompts", async () => {
+        const yml = 'files/chainprompts.yml';
+        const experiment_name = await save_config(yml);
+        expect(experiment_name).toBeDefined();
+        await run_experiment(experiment_name, '');
+    })
+
+    it("multiple inputs sources for prompt node", async () => {
+        const yml = 'files/multipleinputs.yml';
+        const experiment_name = await save_config(yml);
+        expect(experiment_name).toBeDefined();
+        await run_experiment(experiment_name, '');
+    })
+
 });
