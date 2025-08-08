@@ -1003,3 +1003,25 @@ export async function get_processor_result_by_result_id(result_id: number, proce
         console.error('Error fetching processor result by result ID:', error);
     }
 }
+
+export async function get_results_by_experiment_name(experimentName: string, connection: mysql.Connection | mysql.Pool = pool): Promise<Result[]> {
+  const query = `
+    SELECT
+      r.id AS result_id,
+      r.config_id,
+      r.output_result,
+      r.input_id,
+      r.start_time,
+      r.end_time,
+      r.total_tokens,
+      pc.prompt_template_id,
+      e.title AS experiment_title
+    FROM Result r
+    INNER JOIN PromptConfig pc ON r.config_id = pc.id
+    INNER JOIN Experiment e ON pc.experiment_id = e.id
+    WHERE e.title = ?
+  `;
+
+  const [rows] = await pool.query(query, [experimentName]);
+  return rows as Result[];
+}

@@ -1,7 +1,7 @@
 experiment:
   title: chainprompts
   max_retry: 0
-  threads: 1
+  threads: 2
 nodes:
   - template:
       name: prompt-1754659029420
@@ -32,7 +32,7 @@ nodes:
   - template:
       name: promptNode-7232fb95-e8e7-4d60-9a38-056279172f57
       value: 'this is the {prompt}'
-      iterations: 1
+      iterations: 2
       llms:
         - key: e3b9e243-6c45-4c85-bed0-b29ad86cd1fe
           name: GPT-4o

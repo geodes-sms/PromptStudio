@@ -4,7 +4,7 @@ import * as workerpool from 'workerpool';
 import { ExecOptions} from "workerpool/types/types";
 import * as path from "node:path";
 import {ExperimentRunner, Task} from "../backend/api/ExperimentRunner";
-import {save_response} from "../backend/database/database";
+import {get_results_by_experiment_name, save_response} from "../backend/database/database";
 
 
 jest.setTimeout(20000);
@@ -44,18 +44,22 @@ describe("run_experiment", () => {
 
     it("run with a real database", async () => {
         const yml = 'files/flow-1747232648249.yml';
-
         const experiment_name = await save_config(yml);
         expect(experiment_name).toBeDefined();
         await run_experiment(experiment_name, '');
+        const results = await get_results_by_experiment_name(experiment_name);
+        expect(results).toBeDefined();
+        expect(results.length).toBe(18);
     })
 
     it("run with processor then evaluator", async () => {
         const yml = 'files/testflow.yml';
-
         const experiment_name = await save_config(yml);
         expect(experiment_name).toBeDefined();
         await run_experiment(experiment_name, '');
+        const results = await get_results_by_experiment_name(experiment_name);
+        expect(results).toBeDefined();
+        expect(results.length).toBe(6);
     })
 
     it("dataset to processor directly", async () => {
@@ -63,6 +67,9 @@ describe("run_experiment", () => {
         const experiment_name = await save_config(yml);
         expect(experiment_name).toBeDefined();
         await run_experiment(experiment_name, '');
+        const results = await get_results_by_experiment_name(experiment_name);
+        expect(results).toBeDefined();
+        expect(results.length).toBe(6);
     })
 
     it("chain of prompts", async () => {
@@ -70,6 +77,9 @@ describe("run_experiment", () => {
         const experiment_name = await save_config(yml);
         expect(experiment_name).toBeDefined();
         await run_experiment(experiment_name, '');
+        const results = await get_results_by_experiment_name(experiment_name);
+        expect(results).toBeDefined();
+        expect(results.length).toBe(28);
     })
 
     it("multiple inputs sources for prompt node", async () => {
@@ -77,6 +87,9 @@ describe("run_experiment", () => {
         const experiment_name = await save_config(yml);
         expect(experiment_name).toBeDefined();
         await run_experiment(experiment_name, '');
+        const results = await get_results_by_experiment_name(experiment_name);
+        expect(results).toBeDefined();
+        expect(results.length).toBe(196);
     })
 
 });
