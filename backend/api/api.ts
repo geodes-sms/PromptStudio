@@ -5,7 +5,6 @@ import express from 'express';
 import multer from 'multer';
 import {run_experiment} from "./runner";
 import {getTotalTokenCountForExperiment, save_config} from "./configHandler";
-import {Dict} from "../typing";
 
 const app = express();
 const port = 3000;

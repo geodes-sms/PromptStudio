@@ -1,4 +1,4 @@
-import {Dict, LLMSpec, PromptVarsDict} from "../typing";
+import {LLMSpec, PromptVarsDict} from "../typing";
 import * as workerpool from "workerpool";
 import {
     get_config,
@@ -12,7 +12,6 @@ import {
 } from "../database/database";
 import { create_llm_spec, get_marker_map } from "./utils";
 import { Promptconfig } from "./types";
-import {queryLLM} from "../backend";
 
 export type Task = {
     config_id: number;

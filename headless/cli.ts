@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import {getTotalTokenCountForExperiment, run_experiment, save_config} from "./apiCall";
-// @ts-ignore
-import fs from "fs";
+import * as fs from "fs";
 import * as path from "node:path";
 
 /**
