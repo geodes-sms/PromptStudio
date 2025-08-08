@@ -47,7 +47,7 @@ import {PoolConnection} from "mysql2/promise";
  */
 async function handle_save_template(template: prompttemplate, connection: PoolConnection, experiment_id: number){
     const node_id = await save_node('prompt_template', experiment_id, template.name, connection);
-    await save_template(template.value, template.name, template.iterations || 1, {}, node_id, connection);
+    await save_template(template.value, template.name, template.iterations || 1, node_id, connection);
     // Save 1 config for each LLM in the template
     for (const llm of template.llms as LLMSpec[]) {
         const existing = await get_llm_by_base_model(llm.base_model, connection);
