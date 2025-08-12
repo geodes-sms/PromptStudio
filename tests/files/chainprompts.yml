@@ -1,0 +1,90 @@
+experiment:
+  title: chainprompts
+  max_retry: 0
+  threads: 2
+nodes:
+  - template:
+      name: prompt-1754659029420
+      value: '{test}'
+      iterations: 2
+      llms:
+        - key: 3cca1ed5-3ba1-481d-8f4c-c97cc414f860
+          name: GPT3.5
+          model: gpt-3.5-turbo
+          emoji: "\U0001F916"
+          base_model: gpt-3.5-turbo
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+  - dataset:
+      name: textfields-1754659029420
+      path: files/textfields-1754659029420.csv
+  - template:
+      name: promptNode-7232fb95-e8e7-4d60-9a38-056279172f57
+      value: 'this is the {prompt}'
+      iterations: 2
+      llms:
+        - key: e3b9e243-6c45-4c85-bed0-b29ad86cd1fe
+          name: GPT-4o
+          model: gpt-4o
+          emoji: "\U0001F916"
+          base_model: gpt-4
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+  - template:
+      name: promptNode-197e2b10-68a4-40c7-bb68-dc97d32143d9
+      value: 'an other one {text}'
+      iterations: 2
+      llms:
+        - key: 6944872d-a05b-466e-8db2-e4538962a29e
+          name: GPT-4o
+          model: gpt-4o
+          emoji: "\U0001F916"
+          base_model: gpt-4
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+links:
+  - source: textfields-1754659029420
+    target: prompt-1754659029420
+    source_var: output
+    target_var: test
+  - source: prompt-1754659029420
+    target: promptNode-7232fb95-e8e7-4d60-9a38-056279172f57
+    source_var: prompt
+    target_var: prompt
+  - source: promptNode-7232fb95-e8e7-4d60-9a38-056279172f57
+    target: promptNode-197e2b10-68a4-40c7-bb68-dc97d32143d9
+    source_var: prompt
+    target_var: text
