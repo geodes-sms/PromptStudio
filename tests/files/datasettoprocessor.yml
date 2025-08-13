@@ -1,0 +1,53 @@
+experiment:
+  title: dataset to processor
+  max_retry: 0
+  threads: 1
+nodes:
+  - template:
+      name: prompt-1754592213307
+      value: '{var}'
+      iterations: 1
+      llms:
+        - key: 0df87123-55aa-460f-9957-902b0f8584e6
+          name: GPT3.5
+          model: gpt-3.5-turbo
+          emoji: "\U0001F916"
+          base_model: gpt-3.5-turbo
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+  - dataset:
+      name: textfields-1754592213307
+      path: files/textfields-1754592213307.csv
+  - processor:
+      type: javascript
+      name: process-9bee8a51-1db4-412b-b89a-51dfae67efe3
+      file: files/process-9bee8a51-1db4-412b-b89a-51dfae67efe3.js
+  - evaluator:
+      type: javascript
+      name: evalNode-5afa495f-7e8f-4116-987c-256ef7fd9c8d
+      return_type: string
+      file: files/evalNode-5afa495f-7e8f-4116-987c-256ef7fd9c8d.js
+links:
+  - source: textfields-1754592213307
+    target: process-9bee8a51-1db4-412b-b89a-51dfae67efe3
+    source_var: output
+    target_var: responseBatch
+  - source: process-9bee8a51-1db4-412b-b89a-51dfae67efe3
+    target: prompt-1754592213307
+    source_var: output
+    target_var: var
+  - source: prompt-1754592213307
+    target: evalNode-5afa495f-7e8f-4116-987c-256ef7fd9c8d
+    source_var: prompt
+    target_var: responseBatch

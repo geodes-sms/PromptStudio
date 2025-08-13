@@ -1,0 +1,4 @@
+output
+"Shorten the following text without adding any new words: {text}"
+"Delete words in the following paragraph, while keeping grammaticality and readability. Only remove words, do not add any new words. Only return the revised paragraph, nothing else. Paragraph: {text}"
+"Remove words in the following paragraph and return the revised paragraph. Only remove words. The paragraph should still be readable. {text}"

@@ -1,0 +1,53 @@
+experiment:
+  title: test flow
+  max_retry: 0
+  threads: 1
+nodes:
+  - dataset:
+      name: textfields-1754572471705
+      path: files/textfields-1754572471705.csv
+  - template:
+      name: promptNode-73a5a0d4-a5e8-450a-b2ec-e60103cc657f
+      value: '{text}'
+      iterations: 2
+      llms:
+        - key: 4d481ae9-8e89-497a-a9da-2523df9774f7
+          name: GPT-4o
+          model: gpt-4o
+          emoji: "\U0001F916"
+          base_model: gpt-4
+          temp: 1
+          system_msg: You are a helpful assistant.
+          temperature: 1
+          tools: []
+          tool_choice: ''
+          parallel_tool_calls: true
+          top_p: 1
+          stop: []
+          seed: null
+          max_completion_tokens: null
+          presence_penalty: 0
+          frequency_penalty: 0
+          logit_bias: null
+  - processor:
+      type: javascript
+      name: process-ca4a8b38-2291-4429-b06b-75b3b2391e83
+      file: files/process-ca4a8b38-2291-4429-b06b-75b3b2391e83.js
+  - evaluator:
+      type: javascript
+      name: evalNode-33973506-b5da-44c4-9d09-20a313b38786
+      return_type: string
+      file: files/evalNode-33973506-b5da-44c4-9d09-20a313b38786.js
+links:
+  - source: textfields-1754572471705
+    target: promptNode-73a5a0d4-a5e8-450a-b2ec-e60103cc657f
+    source_var: output
+    target_var: text
+  - source: promptNode-73a5a0d4-a5e8-450a-b2ec-e60103cc657f
+    target: process-ca4a8b38-2291-4429-b06b-75b3b2391e83
+    source_var: prompt
+    target_var: responseBatch
+  - source: process-ca4a8b38-2291-4429-b06b-75b3b2391e83
+    target: evalNode-33973506-b5da-44c4-9d09-20a313b38786
+    source_var: output
+    target_var: responseBatch
